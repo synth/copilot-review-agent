@@ -23,6 +23,7 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
+    "onView:selfReview.controlPanel",
     "onView:selfReview.taskList"
   ],
   "contributes": {
@@ -112,8 +113,15 @@
     "views": {
       "self-review": [
         {
+          "type": "webview",
+          "id": "selfReview.controlPanel",
+          "name": "Review Controls",
+          "visibility": "visible"
+        },
+        {
           "id": "selfReview.taskList",
           "name": "Review Findings",
+          "when": "selfReview.hasReview",
           "visibility": "visible"
         }
       ]
@@ -121,25 +129,20 @@
     "viewsWelcome": [
       {
         "view": "selfReview.taskList",
-        "contents": "No review findings yet.\n[Run Review](command:selfReview.reviewBranch)\nReview your branch changes against a base branch using AI."
+        "contents": "No review findings yet."
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "selfReview.reviewBranch",
+          "command": "selfReview.refreshReview",
           "when": "view == selfReview.taskList",
           "group": "navigation@1"
         },
         {
-          "command": "selfReview.refreshReview",
-          "when": "view == selfReview.taskList",
-          "group": "navigation@2"
-        },
-        {
           "command": "selfReview.clearReview",
           "when": "view == selfReview.taskList",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "selfReview.exportMarkdown",

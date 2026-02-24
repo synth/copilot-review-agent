@@ -110,3 +110,31 @@ let _findingCounter = 0;
 export function nextFindingId(): string {
   return `sr-${Date.now()}-${++_findingCounter}`;
 }
+
+/** A persisted review session (for history) */
+export interface ReviewSession {
+  id: string;
+  timestamp: number;
+  baseBranch: string;
+  targetBranch: string;
+  findings: ReviewFinding[];
+  agentSteps: ReviewAgentStep[];
+  summary?: ReviewSessionSummary;
+}
+
+export interface ReviewAgentStep {
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  detail?: string;
+}
+
+export interface ReviewSessionSummary {
+  totalFindings: number;
+  openCount: number;
+  fileCount: number;
+}
+
+/** Generates a unique review session ID */
+export function nextSessionId(): string {
+  return `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}

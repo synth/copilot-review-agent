@@ -19,10 +19,16 @@ const DEFAULT_CONFIG: SelfReviewConfig = {
  * Loads the merged configuration from VS Code settings and .self-review.yml.
  * VS Code settings take precedence for baseBranch, targetBranch, severityThreshold.
  * .self-review.yml provides review-specific rules (categories, custom_instructions, etc.).
+ * .self-review-instructions.md provides custom instructions as a markdown file (like CLAUDE.md).
  */
 export async function loadConfig(): Promise<SelfReviewConfig> {
   const vsConfig = vscode.workspace.getConfiguration('selfReview');
   const fileConfig = await loadYamlConfig();
+  const instructionsFile = loadInstructionsFile();
+
+  // Merge: instructions file content gets appended to any yaml custom_instructions
+  const yamlInstructions = fileConfig.customInstructions || '';
+  const combinedInstructions = [yamlInstructions, instructionsFile].filter(Boolean).join('\n\n');
 
   return {
     baseBranch: vsConfig.get<string>('baseBranch') || fileConfig.baseBranch || DEFAULT_CONFIG.baseBranch,
@@ -32,9 +38,64 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
     excludePaths: fileConfig.excludePaths.length > 0 ? fileConfig.excludePaths : (vsConfig.get<string[]>('excludePaths') || DEFAULT_CONFIG.excludePaths),
     maxFilesPerChunk: vsConfig.get<number>('maxFilesPerChunk') || fileConfig.maxFilesPerChunk || DEFAULT_CONFIG.maxFilesPerChunk,
     categories: fileConfig.categories.length > 0 ? fileConfig.categories : DEFAULT_CONFIG.categories,
-    customInstructions: fileConfig.customInstructions || DEFAULT_CONFIG.customInstructions,
+    customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings || DEFAULT_CONFIG.maxFindings,
   };
+}
+
+/** The conventional filename for custom review instructions */
+export const INSTRUCTIONS_FILENAME = '.self-review-instructions.md';
+
+/**
+ * Check whether the instructions file exists and return its path.
+ */
+export function getInstructionsFilePath(): string | undefined {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) { return undefined; }
+  const p = path.join(workspaceFolder.uri.fsPath, INSTRUCTIONS_FILENAME);
+  return fs.existsSync(p) ? p : undefined;
+}
+
+/**
+ * Load the .self-review-instructions.md file contents, if it exists.
+ */
+function loadInstructionsFile(): string {
+  const filePath = getInstructionsFilePath();
+  if (!filePath) { return ''; }
+  try {
+    return fs.readFileSync(filePath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Generate a sample .self-review-instructions.md file */
+export function generateSampleInstructions(): string {
+  return `# Self Review — Custom Instructions
+
+These instructions are automatically included in every AI code review for this repository.
+Edit this file to customize how the AI reviews your code.
+
+## Project Context
+
+<!-- Describe your project so the AI understands the codebase -->
+- Language / framework: 
+- Architecture patterns: 
+- Key conventions: 
+
+## Review Focus Areas
+
+<!-- Tell the AI what to prioritize -->
+- Pay special attention to authorization and access control
+- Flag potential N+1 query issues
+- Check for proper error handling in async code
+
+## Things to Ignore
+
+<!-- Tell the AI what NOT to flag -->
+- Don't flag missing tests for private methods
+- Ignore formatting / style issues (handled by linter)
+`;
 }
 
 interface FileConfig {

@@ -7,6 +7,30 @@ import { buildChunkContext } from './chunker';
  */
 export class ReviewEngine {
   private model: vscode.LanguageModelChat | undefined;
+  private _selectedModelId: string | undefined;
+
+  /**
+   * Set a specific model by ID (family string).
+   * Pass undefined to reset to auto-selection.
+   */
+  setModel(modelId: string | undefined): void {
+    if (this._selectedModelId !== modelId) {
+      this._selectedModelId = modelId;
+      this.model = undefined; // clear cached model so ensureModel re-selects
+    }
+  }
+
+  /** Return the currently selected model ID (family) or undefined for auto */
+  get selectedModelId(): string | undefined {
+    return this._selectedModelId;
+  }
+
+  /**
+   * List all available Copilot language models.
+   */
+  async listModels(): Promise<vscode.LanguageModelChat[]> {
+    return vscode.lm.selectChatModels({ vendor: 'copilot' });
+  }
 
   /**
    * Select and cache a Copilot language model.
@@ -19,7 +43,15 @@ export class ReviewEngine {
       throw new Error('No Copilot language model available. Make sure GitHub Copilot is installed and signed in.');
     }
 
-    // Prefer a larger model if available
+    if (this._selectedModelId) {
+      const match = models.find(m => m.id === this._selectedModelId);
+      if (match) {
+        this.model = match;
+        return this.model;
+      }
+    }
+
+    // Auto-select: prefer a larger model
     this.model = models.find(m => m.family.includes('claude') || m.family.includes('gpt-4'))
       || models[0];
 
@@ -80,11 +112,13 @@ If there are no findings, respond with: []`;
 
   /**
    * Review a single chunk of diff files.
+   * @param onToken Optional callback invoked with each streamed token fragment
    */
   async reviewChunk(
     chunk: DiffChunk,
     config: SelfReviewConfig,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    onToken?: (fragment: string) => void
   ): Promise<ReviewFinding[]> {
     const model = await this.ensureModel();
     const systemPrompt = this.buildSystemPrompt(config);
@@ -101,11 +135,12 @@ If there are no findings, respond with: []`;
       justification: 'Self Review: Analyzing branch diff for code issues',
     }, token);
 
-    // Collect the full streamed response
+    // Collect the full streamed response, forwarding tokens to caller
     let fullText = '';
     for await (const fragment of response.text) {
       if (token.isCancellationRequested) { break; }
       fullText += fragment;
+      if (onToken) { onToken(fragment); }
     }
 
     return this.parseFindings(fullText, config);
