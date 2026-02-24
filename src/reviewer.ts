@@ -234,6 +234,7 @@ ${finding.suggestedFix ? `- Suggested approach: ${finding.suggestedFix}` : ''}
 - Do not include line numbers, markdown fences, or explanations.
 - The output should be a drop-in replacement that fixes the issue.
 - Preserve indentation and style of the surrounding code.
+- If the fix requires deleting the line(s) entirely with no replacement, output exactly: <<DELETE>>
 
 ## Full File Content
 \`\`\`
@@ -260,6 +261,11 @@ ${fileContent}
     }
     if (fixText.endsWith('```')) {
       fixText = fixText.slice(0, -3).trimEnd();
+    }
+
+    // Handle deletion sentinel — the AI outputs <<DELETE>> when lines should be removed entirely
+    if (fixText.trim() === '<<DELETE>>') {
+      return '';
     }
 
     return fixText;

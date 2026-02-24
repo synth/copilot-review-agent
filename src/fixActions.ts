@@ -34,7 +34,7 @@ export class FixActions {
       },
       async (progress, token) => {
         const fixText = await this.reviewEngine.generateFix(finding, fileContent, token);
-        if (!fixText || token.isCancellationRequested) {
+        if (fixText == null || token.isCancellationRequested) {
           return false;
         }
 
