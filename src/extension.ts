@@ -215,15 +215,18 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMAND: Sort Findings
   // ============================================================
   const sortFindingsCmd = vscode.commands.registerCommand('selfReview.sortFindings', async () => {
-    const current = taskListProvider.getSortMode();
+    const currentSort = taskListProvider.getSortMode();
+    const currentGroup = taskListProvider.getGroupBy();
     const picked = await vscode.window.showQuickPick(
       [
-        { label: '$(list-ordered) Alphabetical', description: 'Sort files A → Z', mode: 'alphabetical' as const },
-        { label: '$(graph) Most Findings', description: 'Sort by number of findings (descending)', mode: 'findingsCount' as const },
+        { label: '$(list-ordered) Alphabetical', description: 'Sort files A → Z' + (currentGroup === 'file' && currentSort === 'alphabetical' ? ' (current)' : ''), mode: 'alphabetical' as const, group: 'file' as const },
+        { label: '$(graph) Most Findings', description: 'Sort by number of findings (descending)' + (currentGroup === 'file' && currentSort === 'findingsCount' ? ' (current)' : ''), mode: 'findingsCount' as const, group: 'file' as const },
+        { label: '$(warning) Group by Severity', description: 'Group findings by Blocker, High, Medium, etc.' + (currentGroup === 'severity' ? ' (current)' : ''), mode: currentSort, group: 'severity' as const },
       ],
-      { placeHolder: `Sort findings by… (current: ${current})` },
+      { placeHolder: `Sort / group findings… (current: ${currentGroup === 'severity' ? 'severity' : currentSort})` },
     );
     if (picked) {
+      taskListProvider.setGroupBy(picked.group);
       taskListProvider.setSortMode(picked.mode);
     }
   });
@@ -398,11 +401,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ============================================================
   function setupSidebarMessageHandler(): void {
-    // Watch for the view to become available, then listen for messages
-    const checkView = setInterval(() => {
-      if (sidebarProvider.view) {
-        clearInterval(checkView);
-        sidebarProvider.view.webview.onDidReceiveMessage(
+    function registerHandler(webviewView: vscode.WebviewView): void {
+        webviewView.webview.onDidReceiveMessage(
           async (msg: ExtensionMessage) => {
             switch (msg.type) {
               case 'loadHistory': {
@@ -579,11 +579,16 @@ export function activate(context: vscode.ExtensionContext) {
           undefined,
           context.subscriptions
         );
-      }
-    }, 200);
+        // Proactively send history so the webview has data immediately
+        sendHistory();
+    }
 
-    // Clean up the interval after 30 seconds if view never appeared
-    setTimeout(() => clearInterval(checkView), 30_000);
+    // If the view is already resolved, register immediately
+    if (sidebarProvider.view) {
+      registerHandler(sidebarProvider.view);
+    }
+    // Also listen for future resolutions (e.g. view hidden then re-shown)
+    sidebarProvider.onDidResolveView(registerHandler);
   }
 
   setupSidebarMessageHandler();

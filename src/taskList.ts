@@ -13,7 +13,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private findings: ReviewFinding[] = [];
-  private groupBy: 'file' | 'severity' = 'file';
+  private groupBy: 'file' | 'severity' = 'severity';
   private sortMode: SortMode = 'alphabetical';
 
   refresh(): void {
@@ -53,6 +53,15 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
 
   toggleGroupBy(): void {
     this.groupBy = this.groupBy === 'file' ? 'severity' : 'file';
+    this.refresh();
+  }
+
+  getGroupBy(): 'file' | 'severity' {
+    return this.groupBy;
+  }
+
+  setGroupBy(mode: 'file' | 'severity'): void {
+    this.groupBy = mode;
     this.refresh();
   }
 
@@ -139,7 +148,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       const openCount = findings.filter(f => f.status === 'open').length;
       const group = new TaskListItem(
         file,
-        vscode.TreeItemCollapsibleState.Expanded,
+        vscode.TreeItemCollapsibleState.Collapsed,
       );
       group.contextValue = 'fileGroup';
       group.description = `${openCount}/${findings.length} open`;
@@ -160,15 +169,40 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       if (findings.length === 0) { continue; }
 
       const openCount = findings.filter(f => f.status === 'open').length;
-      const group = new TaskListItem(
+      const sevGroup = new TaskListItem(
         `${sev.toUpperCase()} (${findings.length})`,
-        vscode.TreeItemCollapsibleState.Expanded,
+        vscode.TreeItemCollapsibleState.Collapsed,
       );
-      group.contextValue = 'severityGroup';
-      group.description = `${openCount} open`;
-      group.iconPath = severityIcon(sev);
-      group.children = findings.map(f => this.findingToTreeItem(f, group));
-      groups.push(group);
+      sevGroup.contextValue = 'severityGroup';
+      sevGroup.description = `${openCount} open`;
+      sevGroup.iconPath = severityIcon(sev);
+
+      // Sub-group by file within each severity
+      const fileMap = new Map<string, ReviewFinding[]>();
+      for (const f of findings) {
+        const arr = fileMap.get(f.file) || [];
+        arr.push(f);
+        fileMap.set(f.file, arr);
+      }
+
+      const fileEntries = Array.from(fileMap.entries());
+      fileEntries.sort((a, b) => a[0].localeCompare(b[0]));
+
+      sevGroup.children = fileEntries.map(([file, fileFindings]) => {
+        const fileOpenCount = fileFindings.filter(f => f.status === 'open').length;
+        const fileGroup = new TaskListItem(
+          file,
+          vscode.TreeItemCollapsibleState.Collapsed,
+        );
+        fileGroup.contextValue = 'fileGroup';
+        fileGroup.description = `${fileOpenCount}/${fileFindings.length} open`;
+        fileGroup.iconPath = new vscode.ThemeIcon('file');
+        fileGroup.parent = sevGroup;
+        fileGroup.children = fileFindings.map(f => this.findingToTreeItem(f, fileGroup));
+        return fileGroup;
+      });
+
+      groups.push(sevGroup);
     }
 
     return groups;

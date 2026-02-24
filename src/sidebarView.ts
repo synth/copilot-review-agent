@@ -82,6 +82,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'selfReview.controlPanel';
   private _view?: vscode.WebviewView;
 
+  private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
+  /** Fires when the webview view is resolved and ready for messages. */
+  public readonly onDidResolveView = this._onDidResolveView.event;
+
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
   resolveWebviewView(
@@ -95,6 +99,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri],
     };
     webviewView.webview.html = this._getHtml();
+    this._onDidResolveView.fire(webviewView);
   }
 
   get view(): vscode.WebviewView | undefined { return this._view; }
