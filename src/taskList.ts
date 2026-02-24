@@ -6,12 +6,15 @@ import { ReviewFinding, severityIcon, severityRank, Severity } from './types';
  * Two-level hierarchy: File (collapsible) > Finding (leaf)
  * With a summary item at the root.
  */
+export type SortMode = 'alphabetical' | 'findingsCount';
+
 export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<TaskListItem | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private findings: ReviewFinding[] = [];
   private groupBy: 'file' | 'severity' = 'file';
+  private sortMode: SortMode = 'alphabetical';
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
@@ -50,6 +53,20 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
 
   toggleGroupBy(): void {
     this.groupBy = this.groupBy === 'file' ? 'severity' : 'file';
+    this.refresh();
+  }
+
+  getSortMode(): SortMode {
+    return this.sortMode;
+  }
+
+  setSortMode(mode: SortMode): void {
+    this.sortMode = mode;
+    this.refresh();
+  }
+
+  cycleSortMode(): void {
+    this.sortMode = this.sortMode === 'alphabetical' ? 'findingsCount' : 'alphabetical';
     this.refresh();
   }
 
@@ -109,8 +126,16 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       fileMap.set(f.file, arr);
     }
 
+    const entries = Array.from(fileMap.entries());
+
+    if (this.sortMode === 'findingsCount') {
+      entries.sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    } else {
+      entries.sort((a, b) => a[0].localeCompare(b[0]));
+    }
+
     const groups: TaskListItem[] = [];
-    for (const [file, findings] of fileMap) {
+    for (const [file, findings] of entries) {
       const openCount = findings.filter(f => f.status === 'open').length;
       const group = new TaskListItem(
         file,

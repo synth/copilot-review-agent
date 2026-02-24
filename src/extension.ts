@@ -212,6 +212,23 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // ============================================================
+  // COMMAND: Sort Findings
+  // ============================================================
+  const sortFindingsCmd = vscode.commands.registerCommand('selfReview.sortFindings', async () => {
+    const current = taskListProvider.getSortMode();
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: '$(list-ordered) Alphabetical', description: 'Sort files A → Z', mode: 'alphabetical' as const },
+        { label: '$(graph) Most Findings', description: 'Sort by number of findings (descending)', mode: 'findingsCount' as const },
+      ],
+      { placeHolder: `Sort findings by… (current: ${current})` },
+    );
+    if (picked) {
+      taskListProvider.setSortMode(picked.mode);
+    }
+  });
+
+  // ============================================================
   // COMMAND: Select Base Branch
   // ============================================================
   const selectBaseCmd = vscode.commands.registerCommand('selfReview.selectBaseBranch', async () => {
@@ -592,6 +609,7 @@ export function activate(context: vscode.ExtensionContext) {
     goToFindingCmd,
     skipTreeItemCmd,
     fixTreeItemCmd,
+    sortFindingsCmd,
   );
 
   // ============================================================
