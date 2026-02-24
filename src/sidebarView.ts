@@ -336,15 +336,16 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 }
 .empty-state .es-icon { font-size: 28px; margin-bottom: 8px; display: block; }
 
-/* ═══════════════════════════════════════════════
-   Back button / detail header
-   ═══════════════════════════════════════════════ */
 .back-btn {
   background: none; border: none; color: var(--vscode-textLink-foreground);
   cursor: pointer; padding: 0 0 8px 0; font-size: 12px;
   display: flex; align-items: center; gap: 4px; width: auto;
 }
 .back-btn:hover { text-decoration: underline; }
+
+/* ═══════════════════════════════════════════════
+   Detail header
+   ═══════════════════════════════════════════════ */
 .detail-header {
   padding: 6px 0 10px 0;
   border-bottom: 1px solid var(--vscode-editorWidget-border, #333);
@@ -548,7 +549,6 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   const historyList   = document.getElementById('history-list');
   const newReviewBtn  = document.getElementById('new-review-btn');
   const backBtn       = document.getElementById('back-btn');
-
   const pastReviewHeader  = document.getElementById('past-review-header');
   const newReviewControls = document.getElementById('new-review-controls');
   const dhBase   = document.getElementById('dh-base');

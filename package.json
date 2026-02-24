@@ -104,6 +104,11 @@
         "command": "selfReview.sortFindings",
         "title": "Sort Findings",
         "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "selfReview.backToHistory",
+        "title": "Back to History",
+        "icon": "$(arrow-left)"
       }
     ],
     "viewsContainers": {
@@ -139,6 +144,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "selfReview.backToHistory",
+          "when": "view == selfReview.taskList && selfReview.inReviewDetail",
+          "group": "navigation@0"
+        },
         {
           "command": "selfReview.sortFindings",
           "when": "view == selfReview.taskList",

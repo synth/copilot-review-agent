@@ -464,6 +464,7 @@ export function activate(context: vscode.ExtensionContext) {
               case 'newReview': {
                 // Switch to new review detail screen and load branches
                 sidebarProvider.showNewReview();
+                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
                 try {
                   const wsFolder = getWorkspaceFolder();
                   const engine = new GitDiffEngine(wsFolder);
@@ -547,6 +548,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 updateStatusBar('findings');
                 sidebarProvider.showReviewDetail(session);
+                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
                 break;
               }
               case 'deleteReview': {
@@ -572,6 +574,7 @@ export function activate(context: vscode.ExtensionContext) {
                 updateStatusBar('idle');
                 sendHistory();
                 sidebarProvider.showHistoryList();
+                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
                 break;
               }
             }
@@ -590,6 +593,19 @@ export function activate(context: vscode.ExtensionContext) {
     // Also listen for future resolutions (e.g. view hidden then re-shown)
     sidebarProvider.onDidResolveView(registerHandler);
   }
+
+  // Register backToHistory command for view/title menu
+  const backToHistoryCmd = vscode.commands.registerCommand('selfReview.backToHistory', () => {
+    // Reuse the same logic as the webview message handler
+    commentManager.clearAll();
+    taskListProvider.clearAll();
+    currentSessionId = undefined;
+    currentSelection = undefined;
+    updateStatusBar('idle');
+    sendHistory();
+    sidebarProvider.showHistoryList();
+    vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
+  });
 
   setupSidebarMessageHandler();
 
@@ -615,6 +631,7 @@ export function activate(context: vscode.ExtensionContext) {
     skipTreeItemCmd,
     fixTreeItemCmd,
     sortFindingsCmd,
+    backToHistoryCmd,
   );
 
   // ============================================================
