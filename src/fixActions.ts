@@ -43,13 +43,26 @@ export class FixActions {
         const startLine = Math.max(0, finding.startLine - 1);
         const endLine = Math.min(lines.length - 1, finding.endLine - 1);
 
+        // Use full-line range including trailing newline for clean line-level edits.
+        // Without this, removing a line leaves a blank line (the \n is outside the range),
+        // and AI-generated fixes that include trailing newlines cause double-newlines.
+        const isLastLine = endLine >= lines.length - 1;
         const range = new vscode.Range(
           new vscode.Position(startLine, 0),
-          new vscode.Position(endLine, lines[endLine]?.length || 0)
+          isLastLine
+            ? new vscode.Position(endLine, lines[endLine]?.length || 0)
+            : new vscode.Position(endLine + 1, 0)
         );
 
+        // Normalize fix text: trim trailing whitespace, then ensure exactly one
+        // trailing newline for non-empty replacements (unless it's the last line).
+        let normalizedFix = fixText.replace(/[\r\n\s]+$/, '');
+        if (normalizedFix.length > 0 && !isLastLine) {
+          normalizedFix += '\n';
+        }
+
         const edit = new vscode.WorkspaceEdit();
-        edit.replace(fileUri, range, fixText);
+        edit.replace(fileUri, range, normalizedFix);
 
         // Apply the edit
         const applied = await vscode.workspace.applyEdit(edit);
@@ -82,7 +95,7 @@ export class FixActions {
    */
   async fixInChat(finding: ReviewFinding): Promise<void> {
     const query = [
-      `@workspace Fix this code review finding in ${finding.file}:${finding.startLine}:`,
+      `Fix this code review finding in #file:${finding.file} at line ${finding.startLine}:`,
       ``,
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
@@ -91,7 +104,8 @@ export class FixActions {
     ].filter(Boolean).join('\n');
 
     try {
-      await vscode.commands.executeCommand('workbench.action.chat.open', { query });
+      // Open in agent mode so the chat can actually edit files (not just explain)
+      await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'agent' });
     } catch {
       // Fallback: try inline chat
       const filePath = path.join(this.workspaceFolder.uri.fsPath, finding.file);
@@ -121,7 +135,7 @@ export class FixActions {
    */
   async fixInEdits(finding: ReviewFinding): Promise<void> {
     const query = [
-      `/edit Fix this issue in #file:${finding.file}`,
+      `Fix this issue in #file:${finding.file}`,
       ``,
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
@@ -130,7 +144,8 @@ export class FixActions {
     ].filter(Boolean).join('\n');
 
     try {
-      await vscode.commands.executeCommand('workbench.action.chat.open', { query });
+      // Open in edit mode so Copilot Edits can apply changes directly
+      await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'edit' });
     } catch {
       // Fallback: try opening the file and triggering inline chat
       vscode.window.showWarningMessage(

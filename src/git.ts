@@ -49,14 +49,14 @@ export class GitDiffEngine {
   }
 
   /** Compute merge base between two refs.
-   *  Falls back to the empty tree SHA when branches are unrelated (orphan). */
+   *  Falls back to the base ref itself when branches are unrelated (orphan). */
   getMergeBase(ref1: string, ref2: string): string {
     try {
       return this.git(`merge-base ${ref1} ${ref2}`);
     } catch {
-      // Branches share no common ancestor — use git's empty tree as the base
-      // so the diff shows all files as new.
-      return '4b825dc642cb6eb9a060e54bf899d69f82cf7657';
+      // Branches share no common ancestor (orphan) — fall back to the base ref
+      // directly. `git diff <base>..<target>` works fine without shared history.
+      return ref1;
     }
   }
 
