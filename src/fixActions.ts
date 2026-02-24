@@ -14,7 +14,8 @@ export class FixActions {
   ) {}
 
   /**
-   * Fix Inline: Use AI to generate a fix, show a diff preview, then apply.
+   * Fix Inline: Open inline chat with the finding context so Copilot generates
+   * the fix directly in the editor, providing keep/undo controls.
    */
   async fixInline(finding: ReviewFinding): Promise<boolean> {
     const filePath = path.join(this.workspaceFolder.uri.fsPath, finding.file);
@@ -23,71 +24,34 @@ export class FixActions {
       return false;
     }
 
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
-    const lines = fileContent.split('\n');
+    const uri = vscode.Uri.file(filePath);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(doc);
 
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Self Review: Generating fix for "${finding.title}"...`,
-        cancellable: true,
-      },
-      async (progress, token) => {
-        const fixText = await this.reviewEngine.generateFix(finding, fileContent, token);
-        if (fixText == null || token.isCancellationRequested) {
-          return false;
-        }
-
-        // Build the workspace edit
-        const fileUri = vscode.Uri.file(filePath);
-        const startLine = Math.max(0, finding.startLine - 1);
-        const endLine = Math.min(lines.length - 1, finding.endLine - 1);
-
-        // Use full-line range including trailing newline for clean line-level edits.
-        // Without this, removing a line leaves a blank line (the \n is outside the range),
-        // and AI-generated fixes that include trailing newlines cause double-newlines.
-        const isLastLine = endLine >= lines.length - 1;
-        const range = new vscode.Range(
-          new vscode.Position(startLine, 0),
-          isLastLine
-            ? new vscode.Position(endLine, lines[endLine]?.length || 0)
-            : new vscode.Position(endLine + 1, 0)
-        );
-
-        // Normalize fix text: trim trailing whitespace, then ensure exactly one
-        // trailing newline for non-empty replacements (unless it's the last line).
-        let normalizedFix = fixText.replace(/[\r\n\s]+$/, '');
-        if (normalizedFix.length > 0 && !isLastLine) {
-          normalizedFix += '\n';
-        }
-
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(fileUri, range, normalizedFix);
-
-        // Apply the edit
-        const applied = await vscode.workspace.applyEdit(edit);
-        if (applied) {
-          // Open the file and show the changed region
-          const doc = await vscode.workspace.openTextDocument(fileUri);
-          const editor = await vscode.window.showTextDocument(doc);
-          editor.revealRange(
-            new vscode.Range(
-              new vscode.Position(startLine, 0),
-              new vscode.Position(startLine + fixText.split('\n').length, 0)
-            ),
-            vscode.TextEditorRevealType.InCenter
-          );
-
-          vscode.window.showInformationMessage(
-            `Self Review: Fix applied for "${finding.title}". Use Ctrl+Z to undo.`
-          );
-          return true;
-        } else {
-          vscode.window.showErrorMessage('Self Review: Failed to apply fix.');
-          return false;
-        }
-      }
+    // Select the relevant lines
+    const startLine = Math.max(0, finding.startLine - 1);
+    const endLine = Math.max(startLine, finding.endLine - 1);
+    editor.selection = new vscode.Selection(
+      new vscode.Position(startLine, 0),
+      new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
     );
+
+    // Build the prompt for inline chat
+    const message = [
+      `Fix: ${finding.title}`,
+      finding.description,
+      finding.suggestedFix ? `Suggested approach: ${finding.suggestedFix}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      await vscode.commands.executeCommand('inlineChat.start', { message, autoSend: true });
+      return true;
+    } catch {
+      vscode.window.showWarningMessage(
+        'Self Review: Could not open inline chat. Is GitHub Copilot installed?'
+      );
+      return false;
+    }
   }
 
   /**
