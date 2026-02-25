@@ -24,6 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
   let currentSelection: BranchSelection | undefined;
   let currentSessionId: string | undefined;
   let controlPanelHidden = false;
+  let reviewInProgress = false; // Mutex to prevent concurrent review executions
   // Core managers
   const commentManager = new CommentManager();
   const taskListProvider = new TaskListProvider();
@@ -60,6 +61,16 @@ export function activate(context: vscode.ExtensionContext) {
     if (!folders || folders.length === 0) {
       throw new Error('No workspace folder open.');
     }
+    // In multi-root workspaces, prefer the folder containing the active editor
+    if (folders.length > 1) {
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor) {
+        const wsFolder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri);
+        if (wsFolder) {
+          return wsFolder;
+        }
+      }
+    }
     return folders[0];
   }
 
@@ -67,7 +78,12 @@ export function activate(context: vscode.ExtensionContext) {
   const fixActions = new FixActions(reviewEngine);
 
   function normalizeFsPathToWorkspace(fsPath: string, wsFolder: vscode.WorkspaceFolder): string {
-    return path.relative(wsFolder.uri.fsPath, fsPath).split(path.sep).join('/');
+    const relativePath = path.relative(wsFolder.uri.fsPath, fsPath).split(path.sep).join('/');
+    // Guard against paths outside the workspace (starting with '..')
+    if (relativePath.startsWith('..')) {
+      return ''; // Return empty string to avoid incorrect matches
+    }
+    return relativePath;
   }
 
   // Helper: resolve a finding ID from various command sources
@@ -251,8 +267,13 @@ export function activate(context: vscode.ExtensionContext) {
     updateStatusBar('idle');
     sidebarProvider.resetReview();
     if (controlPanelHidden) {
-      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-      controlPanelHidden = false;
+      try {
+        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        controlPanelHidden = false;
+      } catch {
+        // Panel state may have desynced; ignore error
+        controlPanelHidden = false;
+      }
     }
   });
 
@@ -466,14 +487,17 @@ export function activate(context: vscode.ExtensionContext) {
   const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
     if (!item.filePath) { return; }
     const findings = taskListProvider.getFileFindings(item.filePath);
-    await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
+    const success = await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
 
-    for (const finding of findings) {
-      commentManager.resolveFinding(finding.id);
-      taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+    // Only mark findings as fixed if the operation succeeded
+    if (success) {
+      for (const finding of findings) {
+        commentManager.resolveFinding(finding.id);
+        taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+      }
+      updateStatusBar('findings');
+      persistFindings();
     }
-    updateStatusBar('findings');
-    persistFindings();
   });
 
   // ============================================================
@@ -497,8 +521,13 @@ export function activate(context: vscode.ExtensionContext) {
     sidebarProvider.showHistoryList();
     vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
     if (controlPanelHidden) {
-      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-      controlPanelHidden = false;
+      try {
+        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        controlPanelHidden = false;
+      } catch {
+        // Panel state may have desynced; ignore error
+        controlPanelHidden = false;
+      }
     }
   }
 
@@ -542,6 +571,14 @@ export function activate(context: vscode.ExtensionContext) {
               case 'runReview': {
                 const payload = msg.payload as { baseBranch?: unknown; targetBranch?: unknown; modelId?: unknown };
                 if (typeof payload?.baseBranch !== 'string' || typeof payload?.targetBranch !== 'string') {
+                  break;
+                }
+                // Validate branch names to prevent command injection.
+                // targetBranch may be empty (meaning current HEAD/working tree), which is valid.
+                const safeBranchPattern = /^[a-zA-Z0-9_./@~^:+\-]+$/;
+                const targetOk = payload.targetBranch === '' || safeBranchPattern.test(payload.targetBranch);
+                if (!safeBranchPattern.test(payload.baseBranch) || !targetOk) {
+                  vscode.window.showErrorMessage('Invalid branch name format.');
                   break;
                 }
                 if (typeof payload.modelId === 'string' && payload.modelId) {
@@ -700,8 +737,13 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
                 // Minimize Review Controls and focus findings for past review too
                 if (!controlPanelHidden) {
-                  vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-                  controlPanelHidden = true;
+                  try {
+                    vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+                    controlPanelHidden = true;
+                  } catch {
+                    // Panel state may have desynced; ignore error
+                    controlPanelHidden = true;
+                  }
                 }
                 vscode.commands.executeCommand('selfReview.taskList.focus');
                 break;
@@ -827,6 +869,13 @@ export function activate(context: vscode.ExtensionContext) {
     sidebar: SidebarViewProvider,
     filePaths?: string[]
   ): Promise<void> {
+    // Mutex: prevent concurrent review executions
+    if (reviewInProgress) {
+      vscode.window.showWarningMessage('A review is already in progress.');
+      return;
+    }
+    reviewInProgress = true;
+
     // Reset module-level state for this review session to ensure warnings fire correctly
     resetWarnings();
 
@@ -1070,8 +1119,13 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Minimize the Review Controls panel and focus the findings tree
       if (!controlPanelHidden) {
-        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-        controlPanelHidden = true;
+        try {
+          vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+          controlPanelHidden = true;
+        } catch {
+          // Panel state may have desynced; ignore error
+          controlPanelHidden = true;
+        }
       }
       vscode.commands.executeCommand('selfReview.taskList.focus');
 
@@ -1110,6 +1164,7 @@ export function activate(context: vscode.ExtensionContext) {
     } finally {
       activeTokenSource = undefined;
       tokenSource.dispose();
+      reviewInProgress = false; // Release mutex
     }
   }
 }
@@ -1142,21 +1197,36 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
   const rangesOverlap = (aStart: number, aEnd: number, bStart: number, bEnd: number): boolean =>
     aStart <= bEnd && aEnd >= bStart;
 
+  // Group findings by file first to reduce comparison space
+  const findingsByFile = new Map<string, ReviewFinding[]>();
   for (const f of findings) {
-    const normalizedTokens = normalizeTitleTokens(f.title);
-    const normalizedTitle = normalizedTokens.join(' ');
-    const key = `${f.file}:${f.startLine}:${f.endLine}:${normalizedTitle}`;
-    if (seen.has(key)) { continue; }
+    const fileFindings = findingsByFile.get(f.file);
+    if (fileFindings) {
+      fileFindings.push(f);
+    } else {
+      findingsByFile.set(f.file, [f]);
+    }
+  }
 
-    const hasNearDuplicate = result.some(r =>
-      r.file === f.file
-      && rangesOverlap(r.startLine, r.endLine, f.startLine, f.endLine)
-      && titleSimilarity(normalizeTitleTokens(r.title), normalizedTokens) >= 0.6
-    );
-    if (hasNearDuplicate) { continue; }
+  // Deduplicate within each file
+  for (const fileFindings of findingsByFile.values()) {
+    for (const f of fileFindings) {
+      const normalizedTokens = normalizeTitleTokens(f.title);
+      const normalizedTitle = normalizedTokens.join(' ');
+      const key = `${f.file}:${f.startLine}:${f.endLine}:${normalizedTitle}`;
+      if (seen.has(key)) { continue; }
 
-    seen.add(key);
-    result.push(f);
+      // Only check for near-duplicates within the same file
+      const hasNearDuplicate = result.some(r =>
+        r.file === f.file
+        && rangesOverlap(r.startLine, r.endLine, f.startLine, f.endLine)
+        && titleSimilarity(normalizeTitleTokens(r.title), normalizedTokens) >= 0.6
+      );
+      if (hasNearDuplicate) { continue; }
+
+      seen.add(key);
+      result.push(f);
+    }
   }
 
   return result;

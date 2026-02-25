@@ -42,14 +42,18 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
   }
 
   addFindings(newFindings: ReviewFinding[]): void {
-    this.findings.push(...newFindings);
+    this.findings = this.findings.concat(newFindings);
     this.refresh();
   }
 
   updateFinding(id: string, update: Partial<ReviewFinding>): void {
     const finding = this.findings.find(f => f.id === id);
     if (finding) {
-      Object.assign(finding, update);
+      // Filter out undefined values to avoid clearing existing fields
+      const filtered = Object.fromEntries(
+        Object.entries(update).filter(([, v]) => v !== undefined)
+      );
+      Object.assign(finding, filtered);
       this.refresh();
     }
   }
@@ -104,8 +108,10 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       return this.getRootItems();
     }
 
-    if (element.contextValue === 'fileGroup' || element.contextValue === 'severityGroup') {
-      return element.children || [];
+    // Return children for intermediate tree nodes (fileGroup, severityGroup).
+    // Leaf nodes (findings) have no children.
+    if (element.children) {
+      return element.children;
     }
 
     return [];

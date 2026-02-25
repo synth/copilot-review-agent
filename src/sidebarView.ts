@@ -262,10 +262,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
   <title>Code Review</title>
+  <style nonce="${nonce}">
+    #loading {
+      padding: 20px;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
-  <div id="loading" style="padding: 20px; text-align: center;">
+  <div id="loading">
     <p>Loading...</p>
   </div>
   <script nonce="${nonce}"></script>

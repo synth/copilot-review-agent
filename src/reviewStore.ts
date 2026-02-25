@@ -16,7 +16,7 @@ export class ReviewStore {
   /** Serialize writes to prevent race conditions */
   private async _serialized<T>(fn: () => Promise<T>): Promise<T> {
     const p = this._writeLock.then(fn);
-    this._writeLock = p.then(() => {}, () => {});
+    this._writeLock = p.then(() => {}, (err) => { console.error('ReviewStore write error:', err); });
     return p;
   }
 
@@ -79,6 +79,7 @@ export class ReviewStore {
         ...r,
         findings,
         summary: {
+          ...r.summary,
           totalFindings: findings.length,
           openCount,
           fileCount,

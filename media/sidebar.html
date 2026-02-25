@@ -408,10 +408,16 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   backBtn.addEventListener('click', () => vscode.postMessage({ type: 'backToHistory' }));
 
   function renderHistory(items) {
-    historyList.innerHTML = '';
+    historyList.replaceChildren();
     if (!items || items.length === 0) {
-      historyList.innerHTML =
-        '<div class="empty-state"><span class="es-icon">📋</span>No reviews yet.<br>Click <b>New Review</b> to get started.</div>';
+      const emptyState = el('div', { cls: 'empty-state', children: [
+        el('span', { cls: 'es-icon', text: '📋' }),
+        document.createElement('br'),
+        'No reviews yet. Click ',
+        el('b', { text: 'New Review' }),
+        ' to get started.',
+      ]});
+      historyList.appendChild(emptyState);
       return;
     }
     for (const item of items) {

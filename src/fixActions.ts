@@ -61,7 +61,7 @@ export class FixActions {
    */
   async fixInChat(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [
-      `Fix this code review finding in #file:${finding.file} at line ${finding.startLine}:`,
+      `Fix this code review finding in #file:"${finding.file}" at line ${finding.startLine}:`,
       ``,
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
@@ -77,6 +77,12 @@ export class FixActions {
       // Fallback: try inline chat
       const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
       const uri = vscode.Uri.file(filePath);
+      try {
+        await vscode.workspace.fs.stat(uri);
+      } catch {
+        vscode.window.showErrorMessage(`File not found: ${finding.file}`);
+        return false;
+      }
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc);
 
@@ -105,7 +111,7 @@ export class FixActions {
    */
   async fixInEdits(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [
-      `Fix this issue in #file:${finding.file}`,
+      `Fix this issue in #file:"${finding.file}"`,
       ``,
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
@@ -129,11 +135,12 @@ export class FixActions {
   /**
    * Fix All in File: Open a single Copilot Edits session with all open findings
    * for the given file combined into one prompt.
+   * Returns true if the edit session was successfully opened (not that the fix was applied).
    */
-  async fixAllInFile(findings: ReviewFinding[], filePath: string, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+  async fixAllInFile(findings: ReviewFinding[], filePath: string, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     if (findings.length === 0) {
       vscode.window.showInformationMessage('No open findings remain for this file.');
-      return;
+      return false;
     }
 
     const findingsList = findings
@@ -149,17 +156,19 @@ export class FixActions {
       .join('\n\n');
 
     const query = [
-      `Fix all of the following code review findings in #file:${filePath}:`,
+      `Fix all of the following code review findings in #file:"${filePath}":`,
       ``,
       findingsList,
     ].join('\n');
 
     try {
       await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'agent' });
+      return true;
     } catch {
       vscode.window.showWarningMessage(
         'Self Review: Could not open Copilot Chat. Is GitHub Copilot installed?'
       );
+      return false;
     }
   }
 }

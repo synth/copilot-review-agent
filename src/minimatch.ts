@@ -13,6 +13,7 @@
  */
 
 const braceWarned = new Set<string>();
+const MAX_BRACE_WARNING_CACHE = 100;
 
 /** Clears the brace-warning state. Useful when re-running tests in the same process. */
 export function resetWarnings(): void {
@@ -21,7 +22,10 @@ export function resetWarnings(): void {
 
 export function minimatch(filePath: string, pattern: string): boolean {
   if (pattern.includes('{') && !braceWarned.has(pattern)) {
-    braceWarned.add(pattern);
+    // Only add to the warning cache if we haven't reached the limit
+    if (braceWarned.size < MAX_BRACE_WARNING_CACHE) {
+      braceWarned.add(pattern);
+    }
     console.warn(
       `[self-review] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
       `Brace expansion is not supported — the pattern will be matched literally.`

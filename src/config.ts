@@ -13,10 +13,24 @@ const DEFAULT_CONFIG: SelfReviewConfig = {
   maxFindings: 50,
 };
 
-const validSeverities: Severity[] = ['low', 'medium', 'high'];
+const validSeverities: Severity[] = ['blocker', 'high', 'medium', 'low', 'nit'];
+
+const validCategories: Category[] = [
+  'security',
+  'performance',
+  'correctness',
+  'maintainability',
+  'testing',
+  'style',
+  'other',
+];
 
 function isValidSeverity(s: unknown): s is Severity {
   return typeof s === 'string' && validSeverities.includes(s as Severity);
+}
+
+function isValidCategory(c: unknown): c is Category {
+  return typeof c === 'string' && validCategories.includes(c as Category);
 }
 
 /**
@@ -168,14 +182,24 @@ async function loadYamlConfig(): Promise<FileConfig> {
     const rawMaxFilesPerChunk = parsed['max_files_per_chunk'];
     const rawMaxFindings = parsed['max_findings'];
 
+    if (rawSeverityThreshold !== undefined && !isValidSeverity(rawSeverityThreshold)) {
+      vscode.window.showWarningMessage(
+        `Self Review: Invalid severity_threshold "${String(rawSeverityThreshold)}" in .self-review.yml. Ignoring.`
+      );
+    }
+
     return {
       baseBranch: typeof parsed['base_branch'] === 'string' ? parsed['base_branch'] : undefined,
       targetBranch: typeof parsed['target_branch'] === 'string' ? parsed['target_branch'] : undefined,
       includeUncommitted: typeof rawIncludeUncommitted === 'boolean' ? rawIncludeUncommitted : undefined,
       severityThreshold: isValidSeverity(rawSeverityThreshold) ? rawSeverityThreshold : undefined,
-      excludePaths: Array.isArray(parsed['exclude_paths']) ? parsed['exclude_paths'] : undefined,
+      excludePaths: Array.isArray(parsed['exclude_paths']) && parsed['exclude_paths'].every(item => typeof item === 'string')
+        ? parsed['exclude_paths']
+        : undefined,
       maxFilesPerChunk: Number.isFinite(rawMaxFilesPerChunk) ? rawMaxFilesPerChunk as number : undefined,
-      categories: Array.isArray(parsed['categories']) ? parsed['categories'] : undefined,
+      categories: Array.isArray(parsed['categories']) && parsed['categories'].every(isValidCategory)
+        ? parsed['categories']
+        : undefined,
       customInstructions: typeof parsed['custom_instructions'] === 'string' ? parsed['custom_instructions'] : undefined,
       maxFindings: Number.isFinite(rawMaxFindings) ? rawMaxFindings as number : undefined,
     };
@@ -230,7 +254,7 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
     // Multiline string (|)
     if (value === '|') {
       const multiLines: string[] = [];
-      let blockIndent: number | undefined;
+      const indents: number[] = [];
       i++;
       while (i < lines.length) {
         const ml = lines[i];
@@ -238,16 +262,19 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
           multiLines.push('');
           i++;
         } else if (/^\s/.test(ml)) {
-          if (blockIndent === undefined) {
-            blockIndent = ml.match(/^(\s*)/)![1].length;
-          }
-          multiLines.push(ml.slice(blockIndent));
+          indents.push(ml.match(/^(\s*)/)![1].length);
+          multiLines.push(ml);
           i++;
         } else {
           break;
         }
       }
-      result[key] = multiLines.join('\n').trimEnd();
+      const blockIndent = indents.length > 0 ? Math.min(...indents) : 0;
+      const normalized = multiLines.map(line => {
+        if (line === '') { return ''; }
+        return line.length >= blockIndent ? line.slice(blockIndent) : line.trimStart();
+      });
+      result[key] = normalized.join('\n').trimEnd();
       continue;
     }
 
@@ -258,6 +285,11 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
     if (value.startsWith('[') && value.endsWith(']')) {
       const inner = value.slice(1, -1);
       if (!inner.includes('[') && !inner.includes(']')) {
+        if (inner.trim() === '') {
+          result[key] = [];
+          i++;
+          continue;
+        }
         result[key] = inner.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
         i++;
         continue;
