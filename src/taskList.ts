@@ -227,6 +227,12 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
     item.parent = parent;
     item.findingId = finding.id;
 
+    // TreeItem.description is plain text (no Markdown), so use a visual text/icon indicator.
+    if (finding.status !== 'open') {
+      item.description = `✓ ${item.description}`;
+      item.iconPath = new vscode.ThemeIcon('pass');
+    }
+
     // Strikethrough label + dimmed description for resolved findings
     if (finding.status !== 'open') {
       item.label = strikeThrough(finding.title);
