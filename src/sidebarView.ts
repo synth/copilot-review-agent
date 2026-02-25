@@ -192,11 +192,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   // HTML
   // ────────────────────────────────────────────────
   private _getHtml(): string {
+    const nonce = getNonce();
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
 /* ═══════════════════════════════════════════════
    Reset & base
@@ -539,7 +541,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   <div id="summary"></div>
 </div>
 
-<script>
+<script nonce="${nonce}">
 (function() {
   const vscode = acquireVsCodeApi();
 
@@ -1066,4 +1068,13 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 </body>
 </html>`;
   }
+}
+
+function getNonce(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let nonce = '';
+  for (let i = 0; i < 32; i++) {
+    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return nonce;
 }
