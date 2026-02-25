@@ -15,7 +15,7 @@ export class ReviewStore {
   getAll(): ReviewSession[] {
     const data = this.state.get<ReviewSession[]>(STORAGE_KEY, []);
     // Ensure newest first
-    return data.sort((a, b) => b.timestamp - a.timestamp);
+    return [...data].sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /** Get a single review by ID */
@@ -56,18 +56,20 @@ export class ReviewStore {
   /** Update findings for a session (when user skips/fixes items) */
   async updateFindings(sessionId: string, findings: ReviewFinding[]): Promise<void> {
     const all = this.state.get<ReviewSession[]>(STORAGE_KEY, []);
-    const session = all.find(r => r.id === sessionId);
-    if (!session) { return; }
-
-    session.findings = findings;
     const openCount = findings.filter(f => f.status === 'open').length;
     const fileCount = new Set(findings.map(f => f.file)).size;
-    session.summary = {
-      totalFindings: findings.length,
-      openCount,
-      fileCount,
-    };
+    const allCopy = all.map(r => r.id === sessionId ? {
+      ...r,
+      findings,
+      summary: {
+        totalFindings: findings.length,
+        openCount,
+        fileCount,
+      },
+    } : r);
 
-    await this.state.update(STORAGE_KEY, all);
+    if (!allCopy.some(r => r.id === sessionId)) { return; }
+
+    await this.state.update(STORAGE_KEY, allCopy);
   }
 }
