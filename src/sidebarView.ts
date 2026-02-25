@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { ReviewSession } from './types';
 
@@ -623,37 +624,42 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       return;
     }
     for (const item of items) {
-      const el = document.createElement('div');
-      el.className = 'history-item';
+      const row = document.createElement('div');
+      row.className = 'history-item';
       const target = item.targetBranch || 'HEAD + wt';
       const dateStr = formatDate(item.timestamp);
       const hasOpen = item.openCount > 0;
-      el.innerHTML =
-        '<div class="hi-header">' +
-          '<span class="hi-branches">' +
-            '<span class="branch-tag">' + esc(item.baseBranch) + '</span>' +
-            ' <span class="arrow">←</span> ' +
-            '<span class="branch-tag">' + esc(target) + '</span>' +
-          '</span>' +
-          '<span class="hi-date">' + esc(dateStr) + '</span>' +
-        '</div>' +
-        '<div class="hi-stats">' +
-          '<span class="hi-badge ' + (hasOpen ? 'open' : 'clear') + '">' +
-            (hasOpen ? esc(String(item.openCount)) + ' open' : 'clear') + '</span>' +
-          esc(String(item.totalFindings)) + ' finding' + (item.totalFindings !== 1 ? 's' : '') +
-          ' in ' + esc(String(item.fileCount)) + ' file' + (item.fileCount !== 1 ? 's' : '') +
-          '<button class="hi-delete" data-id="' + esc(String(item.id)) + '" title="Delete review">✕</button>' +
-        '</div>';
-      el.addEventListener('click', (e) => {
+      const header = el('div', { cls: 'hi-header', children: [
+        el('span', { cls: 'hi-branches', children: [
+          el('span', { cls: 'branch-tag', text: item.baseBranch }),
+          ' ',
+          el('span', { cls: 'arrow', text: '←' }),
+          ' ',
+          el('span', { cls: 'branch-tag', text: target }),
+        ]}),
+        el('span', { cls: 'hi-date', text: dateStr }),
+      ]});
+
+      const deleteBtn = el('button', { cls: 'hi-delete', text: '✕', title: 'Delete review', attrs: { 'data-id': String(item.id) } });
+      const stats = el('div', { cls: 'hi-stats', children: [
+        el('span', { cls: 'hi-badge ' + (hasOpen ? 'open' : 'clear'), text: hasOpen ? item.openCount + ' open' : 'clear' }),
+        String(item.totalFindings) + ' finding' + (item.totalFindings !== 1 ? 's' : '') +
+          ' in ' + String(item.fileCount) + ' file' + (item.fileCount !== 1 ? 's' : ''),
+        deleteBtn,
+      ]});
+
+      row.appendChild(header);
+      row.appendChild(stats);
+
+      row.addEventListener('click', (e) => {
         if (e.target.classList.contains('hi-delete')) return;
         vscode.postMessage({ type: 'openReview', payload: item.id });
       });
-      const del = el.querySelector('.hi-delete');
-      if (del) del.addEventListener('click', (e) => {
+      deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'deleteReview', payload: item.id });
       });
-      historyList.appendChild(el);
+      historyList.appendChild(row);
     }
   }
 
@@ -670,7 +676,34 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+  function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+  /** Create an element with optional className, text content, and children. */
+  function el(tag, opts) {
+    const e = document.createElement(tag);
+    if (opts) {
+      if (opts.cls) e.className = opts.cls;
+      if (opts.text != null) e.textContent = opts.text;
+      if (opts.title) e.title = opts.title;
+      if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
+      if (opts.children) for (const c of opts.children) { if (typeof c === 'string') e.append(c); else e.appendChild(c); }
+    }
+    return e;
+  }
+
+  /** Build the review-summary DOM and replace summaryEl contents. */
+  function renderSummary(totalFindings, fileCount, openCount) {
+    summaryEl.textContent = '';
+    summaryEl.appendChild(el('span', { cls: 'sum-headline', text: 'Review Complete' }));
+    summaryEl.append(' ');
+    summaryEl.appendChild(el('span', { cls: 'count', text: String(totalFindings) }));
+    summaryEl.append(' finding' + (totalFindings !== 1 ? 's' : '') + ' across ');
+    summaryEl.appendChild(el('span', { cls: 'count', text: String(fileCount) }));
+    summaryEl.append(' file' + (fileCount !== 1 ? 's' : '') + ' — ');
+    summaryEl.appendChild(el('span', { cls: 'count', text: String(openCount) }));
+    summaryEl.append(' open');
+    summaryEl.classList.add('visible');
+  }
 
   // ═════════════════════════════════════════════
   //  Branch / model / controls
@@ -872,12 +905,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
           }
           progressFill.style.width = '100%';
           if (data.summary) {
-            summaryEl.innerHTML =
-              '<span class="sum-headline">Review Complete</span>' +
-              '<span class="count">' + esc(String(data.summary.totalFindings)) + '</span> finding' + (data.summary.totalFindings !== 1 ? 's' : '') +
-              ' across <span class="count">' + esc(String(data.summary.fileCount)) + '</span> file' + (data.summary.fileCount !== 1 ? 's' : '') +
-              ' — <span class="count">' + esc(String(data.summary.openCount)) + '</span> open';
-            summaryEl.classList.add('visible');
+            renderSummary(data.summary.totalFindings, data.summary.fileCount, data.summary.openCount);
           }
           postActions.style.display = 'flex';
           reviewState = 'done';
@@ -998,12 +1026,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 
       case 'setReviewSummary': {
         const { openCount, fileCount, totalFindings } = msg.payload;
-        summaryEl.innerHTML =
-          '<span class="sum-headline">Review Complete</span>' +
-          '<span class="count">' + esc(String(totalFindings)) + '</span> finding' + (totalFindings !== 1 ? 's' : '') +
-          ' across <span class="count">' + esc(String(fileCount)) + '</span> file' + (fileCount !== 1 ? 's' : '') +
-          ' — <span class="count">' + esc(String(openCount)) + '</span> open';
-        summaryEl.classList.add('visible');
+        renderSummary(totalFindings, fileCount, openCount);
         break;
       }
 
@@ -1087,10 +1110,5 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 }
 
 function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
+  return crypto.randomBytes(16).toString('hex');
 }
