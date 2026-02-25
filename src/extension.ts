@@ -157,12 +157,25 @@ export function activate(context: vscode.ExtensionContext) {
       const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false);
 
       // Use current selection or defaults
-      const selection = currentSelection || {
-        baseBranch: config.baseBranch,
-        targetBranch: config.targetBranch,
-        includeUncommitted: config.includeUncommitted,
-        mergeBase: engine.getMergeBase(config.baseBranch, config.targetBranch || 'HEAD'),
-      };
+      let selection = currentSelection;
+      if (!selection) {
+        const targetRef = config.targetBranch || 'HEAD';
+        let mergeBase: string;
+        try {
+          mergeBase = engine.getMergeBase(config.baseBranch, targetRef);
+        } catch {
+          vscode.window.showErrorMessage(
+            `Self Review: Cannot compute merge base between "${config.baseBranch}" and "${targetRef}". Are the branches related?`
+          );
+          return;
+        }
+        selection = {
+          baseBranch: config.baseBranch,
+          targetBranch: config.targetBranch,
+          includeUncommitted: config.includeUncommitted,
+          mergeBase,
+        };
+      }
 
       await runReview(wsFolder, engine, config, selection, commentManager, taskListProvider, reviewEngine, sidebarProvider, [relativePath]);
     } catch (err: unknown) {
