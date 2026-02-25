@@ -85,9 +85,11 @@ export interface AgentStep {
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'selfReview.controlPanel';
   private static readonly MAX_PENDING = 500;
+  private static readonly READY_TIMEOUT_MS = 5000;
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _pendingMessages: WebviewMessage[] = [];
+  private _htmlCache?: string;
 
   private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
   /** Fires when the webview view is resolved and ready for messages. */
@@ -114,19 +116,29 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     };
     webviewView.webview.html = this._getHtml();
 
-    // Wait for the webview JS to signal readiness before flushing queued messages
+    // Wait for the webview JS to signal readiness before flushing queued messages.
+    // A timeout fallback ensures messages aren't queued forever if 'ready' is missed.
     this._webviewReady = false;
+    const flushPending = () => {
+      if (this._webviewReady) { return; }
+      this._webviewReady = true;
+      readyListener.dispose();
+      for (const pending of this._pendingMessages) {
+        webviewView.webview.postMessage(pending);
+      }
+      this._pendingMessages = [];
+    };
     const readyListener = webviewView.webview.onDidReceiveMessage((msg: ExtensionMessage) => {
       if (msg.type === 'ready') {
-        this._webviewReady = true;
-        readyListener.dispose();
-        for (const pending of this._pendingMessages) {
-          webviewView.webview.postMessage(pending);
-        }
-        this._pendingMessages = [];
+        clearTimeout(readyTimeout);
+        flushPending();
       }
     });
-    webviewView.onDidDispose(() => readyListener.dispose());
+    const readyTimeout = setTimeout(flushPending, SidebarViewProvider.READY_TIMEOUT_MS);
+    webviewView.onDidDispose(() => {
+      clearTimeout(readyTimeout);
+      readyListener.dispose();
+    });
 
     this._onDidResolveView.fire(webviewView);
   }
@@ -230,9 +242,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   // ────────────────────────────────────────────────
   private _getHtml(): string {
     const nonce = getNonce();
-    const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
-    const html = fs.readFileSync(htmlPath, 'utf8');
-    return html.replace(/\{\{NONCE\}\}/g, nonce);
+    if (!this._htmlCache) {
+      const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
+      this._htmlCache = fs.readFileSync(htmlPath, 'utf8');
+    }
+    return this._htmlCache.replace(/\{\{NONCE\}\}/g, nonce);
   }
 }
 

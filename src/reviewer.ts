@@ -74,8 +74,9 @@ export class ReviewEngine {
       // Only retry on errors that suggest a stale model reference (e.g. session
       // expired, model uninstalled). Do NOT retry cancellations or quota/rate-limit
       // errors — those would silently re-execute a full LLM call at extra cost.
-      const isStale = err?.code === 'model-not-found' || err?.message?.includes('not available');
+      const isStale = err?.code === 'model-not-found';
       if (!isStale || token.isCancellationRequested) { throw err; }
+      console.warn('Self Review: Model reference stale, retrying with fresh model', err?.code);
       this.model = undefined;
       const freshModel = await this.ensureModel();
       return await freshModel.sendRequest(messages, options, token);

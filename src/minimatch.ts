@@ -39,7 +39,7 @@ export function minimatch(filePath: string, pattern: string): boolean {
  * `*` and `?` are handled by the glob parser above, so they never
  * reach this helper during normal operation.
  */
-const REGEX_SPECIAL = /[-\\^$.*+?()[\]{}|]/;
+const REGEX_SPECIAL = /[-\\^$.*+?()[\]{}|]/g;
 
 function globToRegex(pattern: string): RegExp {
   let regexStr = '';

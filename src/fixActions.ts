@@ -14,6 +14,7 @@ export class FixActions {
   /**
    * Fix Inline: Open inline chat with the finding context so Copilot generates
    * the fix directly in the editor, providing keep/undo controls.
+   * Returns true if the inline chat was successfully initiated (not that the fix was applied).
    */
   async fixInline(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
@@ -56,7 +57,7 @@ export class FixActions {
 
   /**
    * Fix in Chat: Open Copilot Chat with the finding context pre-filled.
-   * Returns true if the chat was opened successfully, false otherwise.
+   * Returns true if the chat was successfully opened (not that the fix was applied).
    */
   async fixInChat(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [
@@ -100,7 +101,7 @@ export class FixActions {
 
   /**
    * Fix in Copilot Edits: Open an edit session with the finding context.
-   * Returns true if the edit session was opened successfully, false otherwise.
+   * Returns true if the edit session was successfully opened (not that the fix was applied).
    */
   async fixInEdits(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [

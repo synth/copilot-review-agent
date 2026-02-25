@@ -63,7 +63,7 @@ function buildFileContext(file: DiffFile, contextLines: number = 30): string {
 
 /**
  * Estimate token count from a string.
- * Uses a rough heuristic (~4 chars per token) as a fallback.
+ * Uses a rough heuristic (~3.5 chars per token) as a fallback.
  * When a model is available, use model.countTokens() for accuracy.
  */
 function estimateTokens(text: string): number {

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SelfReviewConfig, Severity, Category } from './types';
 
 const DEFAULT_CONFIG: SelfReviewConfig = {
-  baseBranch: 'develop',
+  baseBranch: 'main',
   targetBranch: '',
   includeUncommitted: true,
   severityThreshold: 'low',
@@ -53,11 +53,15 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
   const userExcludePaths = userValue<string[]>('excludePaths');
   const userMaxFilesPerChunk = userValue<number>('maxFilesPerChunk');
 
+  if (userSeverity !== undefined && !isValidSeverity(userSeverity)) {
+    vscode.window.showWarningMessage(`Self Review: Invalid severityThreshold "${userSeverity}". Using default.`);
+  }
+
   return {
     baseBranch: userBaseBranch ?? fileConfig.baseBranch ?? DEFAULT_CONFIG.baseBranch,
     targetBranch: userTargetBranch ?? fileConfig.targetBranch ?? DEFAULT_CONFIG.targetBranch,
     includeUncommitted: userIncludeUncommitted ?? fileConfig.includeUncommitted ?? DEFAULT_CONFIG.includeUncommitted,
-    severityThreshold: isValidSeverity(userSeverity) ? userSeverity : (fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold),
+    severityThreshold: isValidSeverity(userSeverity) ? userSeverity : (fileConfig.severityThreshold ?? DEFAULT_CONFIG.severityThreshold),
     excludePaths: userExcludePaths ?? fileConfig.excludePaths ?? DEFAULT_CONFIG.excludePaths,
     maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
     categories: fileConfig.categories ?? DEFAULT_CONFIG.categories,
@@ -219,14 +223,18 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
     // Multiline string (|)
     if (value === '|') {
       const multiLines: string[] = [];
+      let blockIndent: number | undefined;
       i++;
       while (i < lines.length) {
         const ml = lines[i];
-        if (ml.match(/^\s/) && ml.trim()) {
-          multiLines.push(ml.trim());
-          i++;
-        } else if (ml.trim() === '') {
+        if (ml.trim() === '') {
           multiLines.push('');
+          i++;
+        } else if (/^\s/.test(ml)) {
+          if (blockIndent === undefined) {
+            blockIndent = ml.match(/^(\s*)/)![1].length;
+          }
+          multiLines.push(ml.slice(blockIndent));
           i++;
         } else {
           break;
@@ -260,12 +268,7 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
         }
         i++;
       }
-      if (arr.length > 0) {
-        result[key] = arr;
-        continue;
-      }
-      // Not an array, just empty value
-      result[key] = '';
+      result[key] = arr;
       continue;
     }
 
@@ -273,9 +276,11 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
     if (value === 'true') { result[key] = true; i++; continue; }
     if (value === 'false') { result[key] = false; i++; continue; }
 
-    // Number
-    const num = Number(value);
-    if (!isNaN(num) && value !== '') { result[key] = num; i++; continue; }
+    // Number (only if not quoted)
+    if (!/^["']/.test(value)) {
+      const num = Number(value);
+      if (!isNaN(num) && value !== '') { result[key] = num; i++; continue; }
+    }
 
     // String (strip quotes)
     result[key] = value.replace(/^["']|["']$/g, '');
@@ -291,7 +296,7 @@ export function generateSampleConfig(): string {
 # See https://github.com/recognize/self-review-vscode for docs
 
 # Default base branch to compare against
-base_branch: develop
+base_branch: main
 
 # Default target branch (empty = current HEAD + working tree)
 target_branch: ""

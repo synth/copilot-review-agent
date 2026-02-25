@@ -15,14 +15,14 @@ import { SidebarViewProvider, ExtensionMessage } from './sidebarView';
 import { ReviewStore } from './reviewStore';
 import { ReviewSession, ReviewAgentStep, nextSessionId } from './types';
 
-/** Current session state */
-let currentSelection: BranchSelection | undefined;
-let currentSessionId: string | undefined;
-let statusBarItem: vscode.StatusBarItem;
+/** Held so deactivate() can cancel in-flight requests across activations. */
 let activeTokenSource: vscode.CancellationTokenSource | undefined;
-let controlPanelHidden = false;
 
 export function activate(context: vscode.ExtensionContext) {
+  /** Per-activation mutable state */
+  let currentSelection: BranchSelection | undefined;
+  let currentSessionId: string | undefined;
+  let controlPanelHidden = false;
   // Core managers
   const commentManager = new CommentManager();
   const taskListProvider = new TaskListProvider();
@@ -48,7 +48,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 
   // Status bar
-  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusBarItem.command = 'selfReview.reviewBranch';
   updateStatusBar('idle');
   statusBarItem.show();
@@ -302,18 +302,23 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMAND: Init Config
   // ============================================================
   const initConfigCmd = vscode.commands.registerCommand('selfReview.initConfig', async () => {
-    const wsFolder = getWorkspaceFolder();
-    const configPath = path.join(wsFolder.uri.fsPath, '.self-review.yml');
-    if (fs.existsSync(configPath)) {
-      const overwrite = await vscode.window.showWarningMessage(
-        '.self-review.yml already exists. Overwrite?',
-        'Yes', 'No'
-      );
-      if (overwrite !== 'Yes') { return; }
+    try {
+      const wsFolder = getWorkspaceFolder();
+      const configPath = path.join(wsFolder.uri.fsPath, '.self-review.yml');
+      if (fs.existsSync(configPath)) {
+        const overwrite = await vscode.window.showWarningMessage(
+          '.self-review.yml already exists. Overwrite?',
+          'Yes', 'No'
+        );
+        if (overwrite !== 'Yes') { return; }
+      }
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(configPath), Buffer.from(generateSampleConfig(), 'utf-8'));
+      const doc = await vscode.workspace.openTextDocument(configPath);
+      await vscode.window.showTextDocument(doc);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(configPath), Buffer.from(generateSampleConfig(), 'utf-8'));
-    const doc = await vscode.workspace.openTextDocument(configPath);
-    await vscode.window.showTextDocument(doc);
   });
 
   // ============================================================
@@ -344,10 +349,9 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
 
-    const success = await fixActions.fixInline(finding, getWorkspaceFolder());
-    if (success) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
+    if (initiated) {
+      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -358,10 +362,9 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    const success = await fixActions.fixInChat(finding, getWorkspaceFolder());
-    if (success) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    const initiated = await fixActions.fixInChat(finding, getWorkspaceFolder());
+    if (initiated) {
+      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -372,10 +375,9 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    const success = await fixActions.fixInEdits(finding, getWorkspaceFolder());
-    if (success) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    const initiated = await fixActions.fixInEdits(finding, getWorkspaceFolder());
+    if (initiated) {
+      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -419,10 +421,9 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(item.findingId);
     if (!finding) { return; }
 
-    const success = await fixActions.fixInline(finding, getWorkspaceFolder());
-    if (success) {
-      commentManager.resolveFinding(item.findingId);
-      taskListProvider.updateFinding(item.findingId, { status: 'fixed' });
+    const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
+    if (initiated) {
+      taskListProvider.updateFinding(item.findingId, { status: 'in-progress' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -431,13 +432,9 @@ export function activate(context: vscode.ExtensionContext) {
   const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
     if (!item.filePath) { return; }
     const findings = taskListProvider.getFileFindings(item.filePath);
+    // fixAllInFile only opens a Copilot Chat session — it doesn't actually apply fixes.
+    // Don't auto-mark findings as fixed; let the user resolve them manually.
     await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
-    for (const finding of findings) {
-      commentManager.resolveFinding(finding.id);
-      taskListProvider.updateFinding(finding.id, { status: 'fixed' });
-    }
-    updateStatusBar('findings');
-    persistFindings();
   });
 
   // ============================================================
@@ -448,6 +445,22 @@ export function activate(context: vscode.ExtensionContext) {
   function sendHistory(): void {
     const sessions = reviewStore.getAll();
     sidebarProvider.setHistory(sessions);
+  }
+
+  // HELPER: navigate back to history list
+  function backToHistory(): void {
+    commentManager.clearAll();
+    taskListProvider.clearAll();
+    currentSessionId = undefined;
+    currentSelection = undefined;
+    updateStatusBar('idle');
+    sendHistory();
+    sidebarProvider.showHistoryList();
+    vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
+    if (controlPanelHidden) {
+      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+      controlPanelHidden = false;
+    }
   }
 
   // ============================================================
@@ -652,19 +665,7 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'backToHistory': {
-                // Clear current review display (keep data persisted)
-                commentManager.clearAll();
-                taskListProvider.clearAll();
-                currentSessionId = undefined;
-                currentSelection = undefined;
-                updateStatusBar('idle');
-                sendHistory();
-                sidebarProvider.showHistoryList();
-                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
-                if (controlPanelHidden) {
-                  vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-                  controlPanelHidden = false;
-                }
+                backToHistory();
                 break;
               }
             }
@@ -690,19 +691,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register backToHistory command for view/title menu
   const backToHistoryCmd = vscode.commands.registerCommand('selfReview.backToHistory', () => {
-    // Reuse the same logic as the webview message handler
-    commentManager.clearAll();
-    taskListProvider.clearAll();
-    currentSessionId = undefined;
-    currentSelection = undefined;
-    updateStatusBar('idle');
-    sendHistory();
-    sidebarProvider.showHistoryList();
-    vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
-    if (controlPanelHidden) {
-      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
-      controlPanelHidden = false;
-    }
+    backToHistory();
   });
 
   const sidebarHandlerDisposables = setupSidebarMessageHandler();
