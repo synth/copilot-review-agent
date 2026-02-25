@@ -25,9 +25,10 @@ export class CommentManager {
     const startLine = Math.max(0, finding.startLine - 1); // 0-based
     const endLine = Math.max(startLine, finding.endLine - 1);
 
+    const END_OF_LINE = 99999;
     const range = new vscode.Range(
       new vscode.Position(startLine, 0),
-      new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
+      new vscode.Position(endLine, END_OF_LINE)
     );
 
     const body = this.buildCommentBody(finding);

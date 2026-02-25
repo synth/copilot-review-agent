@@ -1,6 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs';
 import { SelfReviewConfig, Severity, Category } from './types';
 
 const DEFAULT_CONFIG: SelfReviewConfig = {
@@ -30,7 +28,7 @@ function isValidSeverity(s: unknown): s is Severity {
 export async function loadConfig(): Promise<SelfReviewConfig> {
   const vsConfig = vscode.workspace.getConfiguration('selfReview');
   const fileConfig = await loadYamlConfig();
-  const instructionsFile = loadInstructionsFile();
+  const instructionsFile = await loadInstructionsFile();
 
   // Merge: instructions file content gets appended to any yaml custom_instructions
   const yamlInstructions = fileConfig.customInstructions || '';
@@ -54,23 +52,29 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
 export const INSTRUCTIONS_FILENAME = '.self-review-instructions.md';
 
 /**
- * Check whether the instructions file exists and return its path.
+ * Check whether the instructions file exists and return its URI.
  */
-export function getInstructionsFilePath(): string | undefined {
+export async function getInstructionsFilePath(): Promise<vscode.Uri | undefined> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) { return undefined; }
-  const p = path.join(workspaceFolder.uri.fsPath, INSTRUCTIONS_FILENAME);
-  return fs.existsSync(p) ? p : undefined;
+  const uri = vscode.Uri.joinPath(workspaceFolder.uri, INSTRUCTIONS_FILENAME);
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return uri;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Load the .self-review-instructions.md file contents, if it exists.
  */
-function loadInstructionsFile(): string {
-  const filePath = getInstructionsFilePath();
-  if (!filePath) { return ''; }
+async function loadInstructionsFile(): Promise<string> {
+  const uri = await getInstructionsFilePath();
+  if (!uri) { return ''; }
   try {
-    return fs.readFileSync(filePath, 'utf-8').trim();
+    const content = await vscode.workspace.fs.readFile(uri);
+    return Buffer.from(content).toString('utf-8').trim();
   } catch {
     return '';
   }
@@ -125,13 +129,16 @@ async function loadYamlConfig(): Promise<FileConfig> {
     return empty;
   }
 
-  const configPath = path.join(workspaceFolder.uri.fsPath, '.self-review.yml');
-  if (!fs.existsSync(configPath)) {
+  const configUri = vscode.Uri.joinPath(workspaceFolder.uri, '.self-review.yml');
+  let content: string;
+  try {
+    const raw = await vscode.workspace.fs.readFile(configUri);
+    content = Buffer.from(raw).toString('utf-8');
+  } catch {
     return empty;
   }
 
   try {
-    const content = fs.readFileSync(configPath, 'utf-8');
     const parsed = parseSimpleYaml(content);
 
     return {

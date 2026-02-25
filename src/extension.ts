@@ -559,6 +559,7 @@ export function activate(context: vscode.ExtensionContext) {
                   baseBranch: session.baseBranch,
                   targetBranch: session.targetBranch,
                   includeUncommitted: !session.targetBranch,
+                  mergeBase: engine.getMergeBase(session.baseBranch, session.targetBranch || 'HEAD'),
                 };
 
                 updateStatusBar('findings');

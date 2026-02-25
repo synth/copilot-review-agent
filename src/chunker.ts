@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+
 import { DiffFile, DiffChunk, SelfReviewConfig } from './types';
 
 /**
