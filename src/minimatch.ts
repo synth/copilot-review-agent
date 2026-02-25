@@ -12,11 +12,11 @@
  * diagnostic warning is logged on first occurrence.
  */
 
-let braceWarningEmitted = false;
+const braceWarned = new Set<string>();
 
 export function minimatch(filePath: string, pattern: string): boolean {
-  if (!braceWarningEmitted && pattern.includes('{')) {
-    braceWarningEmitted = true;
+  if (pattern.includes('{') && !braceWarned.has(pattern)) {
+    braceWarned.add(pattern);
     console.warn(
       `[self-review] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
       `Brace expansion is not supported — the pattern will be matched literally.`
@@ -45,11 +45,17 @@ function globToRegex(pattern: string): RegExp {
 
     if (c === '*') {
       if (pattern[i + 1] === '*') {
-        // ** matches any number of directories
         if (pattern[i + 2] === '/') {
+          // `**/` — matches zero or more directory segments.
+          //   `**/foo.ts`  → matches `foo.ts` and `dir/foo.ts`
+          //   `foo/**/bar` → matches `foo/bar` and `foo/x/bar`
           regexStr += '(?:.*/)?';
           i += 3;
         } else {
+          // `**` without trailing `/` — matches any characters
+          // including `/` (greedy, to end of path).
+          //   `foo/**` → matches `foo/`, `foo/a`, `foo/a/b`
+          //   `**`     → matches every path
           regexStr += '.*';
           i += 2;
         }
