@@ -1000,7 +1000,6 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     tasksContainer.innerHTML = '';
     tasks.clear();
     postActions.style.display = 'none';
-    reviewActions.style.display = 'none';
     runBtn.disabled = false;
     runIcon.textContent = '▶';
     runLabel.textContent = 'Run Review';

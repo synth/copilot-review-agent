@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { ReviewFinding, severityIcon, severityRank, Severity } from './types';
 
+/** Apply Unicode combining long stroke overlay (U+0336) to every character. */
+function strikeThrough(text: string): string {
+  return [...text].map(ch => ch + '\u0336').join('');
+}
+
 /**
  * TreeView sidebar for the Self Review task list.
  * Two-level hierarchy: File (collapsible) > Finding (leaf)
@@ -104,13 +109,12 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       return [];
     }
 
-    const open = this.findings.filter(f => f.status === 'open').length;
-    const skipped = this.findings.filter(f => f.status === 'skipped').length;
-    const fixed = this.findings.filter(f => f.status === 'fixed').length;
+    const resolved = this.findings.filter(f => f.status !== 'open').length;
+    const total = this.findings.length;
 
     // Summary item
     const summary = new TaskListItem(
-      `${this.findings.length} findings — ${open} open, ${skipped} skipped, ${fixed} fixed`,
+      `${resolved}/${total} resolved`,
       vscode.TreeItemCollapsibleState.None,
     );
     summary.contextValue = 'summary';
@@ -145,13 +149,13 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
 
     const groups: TaskListItem[] = [];
     for (const [file, findings] of entries) {
-      const openCount = findings.filter(f => f.status === 'open').length;
+      const resolvedCount = findings.filter(f => f.status !== 'open').length;
       const group = new TaskListItem(
         file,
         vscode.TreeItemCollapsibleState.Collapsed,
       );
       group.contextValue = 'fileGroup';
-      group.description = `${openCount}/${findings.length} open`;
+      group.description = `${resolvedCount}/${findings.length} resolved`;
       group.iconPath = new vscode.ThemeIcon('file');
       group.children = findings.map(f => this.findingToTreeItem(f, group));
       groups.push(group);
@@ -168,13 +172,13 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       const findings = this.findings.filter(f => f.severity === sev);
       if (findings.length === 0) { continue; }
 
-      const openCount = findings.filter(f => f.status === 'open').length;
+      const resolvedCount = findings.filter(f => f.status !== 'open').length;
       const sevGroup = new TaskListItem(
         `${sev.toUpperCase()} (${findings.length})`,
         vscode.TreeItemCollapsibleState.Collapsed,
       );
       sevGroup.contextValue = 'severityGroup';
-      sevGroup.description = `${openCount} open`;
+      sevGroup.description = `${resolvedCount}/${findings.length} resolved`;
       sevGroup.iconPath = severityIcon(sev);
 
       // Sub-group by file within each severity
@@ -189,13 +193,13 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       fileEntries.sort((a, b) => a[0].localeCompare(b[0]));
 
       sevGroup.children = fileEntries.map(([file, fileFindings]) => {
-        const fileOpenCount = fileFindings.filter(f => f.status === 'open').length;
+        const fileResolvedCount = fileFindings.filter(f => f.status !== 'open').length;
         const fileGroup = new TaskListItem(
           file,
           vscode.TreeItemCollapsibleState.Collapsed,
         );
         fileGroup.contextValue = 'fileGroup';
-        fileGroup.description = `${fileOpenCount}/${fileFindings.length} open`;
+        fileGroup.description = `${fileResolvedCount}/${fileFindings.length} resolved`;
         fileGroup.iconPath = new vscode.ThemeIcon('file');
         fileGroup.parent = sevGroup;
         fileGroup.children = fileFindings.map(f => this.findingToTreeItem(f, fileGroup));
@@ -223,9 +227,10 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
     item.parent = parent;
     item.findingId = finding.id;
 
-    // Strikethrough for resolved findings
+    // Strikethrough label + dimmed description for resolved findings
     if (finding.status !== 'open') {
-      item.description = `~~${item.description}~~ (${finding.status})`;
+      item.label = strikeThrough(finding.title);
+      item.description = `${item.description} (${finding.status})`;
     }
 
     // Click navigates to the finding

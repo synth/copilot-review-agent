@@ -44,6 +44,8 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true,
   });
 
+
+
   // Status bar
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusBarItem.command = 'selfReview.reviewBranch';
