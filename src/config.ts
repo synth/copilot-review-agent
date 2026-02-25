@@ -62,7 +62,7 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
     maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
     categories: fileConfig.categories ?? DEFAULT_CONFIG.categories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
-    maxFindings: fileConfig.maxFindings || DEFAULT_CONFIG.maxFindings,
+    maxFindings: fileConfig.maxFindings ?? DEFAULT_CONFIG.maxFindings,
   };
 }
 
@@ -159,16 +159,21 @@ async function loadYamlConfig(): Promise<FileConfig> {
   try {
     const parsed = parseSimpleYaml(content);
 
+    const rawIncludeUncommitted = parsed['include_uncommitted'];
+    const rawSeverityThreshold = parsed['severity_threshold'];
+    const rawMaxFilesPerChunk = parsed['max_files_per_chunk'];
+    const rawMaxFindings = parsed['max_findings'];
+
     return {
-      baseBranch: parsed['base_branch'] as string | undefined,
-      targetBranch: parsed['target_branch'] as string | undefined,
-      includeUncommitted: parsed['include_uncommitted'] as boolean | undefined,
-      severityThreshold: parsed['severity_threshold'] as Severity | undefined,
+      baseBranch: typeof parsed['base_branch'] === 'string' ? parsed['base_branch'] : undefined,
+      targetBranch: typeof parsed['target_branch'] === 'string' ? parsed['target_branch'] : undefined,
+      includeUncommitted: typeof rawIncludeUncommitted === 'boolean' ? rawIncludeUncommitted : undefined,
+      severityThreshold: isValidSeverity(rawSeverityThreshold) ? rawSeverityThreshold : undefined,
       excludePaths: Array.isArray(parsed['exclude_paths']) ? parsed['exclude_paths'] : undefined,
-      maxFilesPerChunk: parsed['max_files_per_chunk'] as number | undefined,
+      maxFilesPerChunk: Number.isFinite(rawMaxFilesPerChunk) ? rawMaxFilesPerChunk as number : undefined,
       categories: Array.isArray(parsed['categories']) ? parsed['categories'] : undefined,
-      customInstructions: parsed['custom_instructions'] as string | undefined,
-      maxFindings: parsed['max_findings'] as number | undefined,
+      customInstructions: typeof parsed['custom_instructions'] === 'string' ? parsed['custom_instructions'] : undefined,
+      maxFindings: Number.isFinite(rawMaxFindings) ? rawMaxFindings as number : undefined,
     };
   } catch (err) {
     vscode.window.showWarningMessage(`Self Review: Failed to parse .self-review.yml: ${err}`);
@@ -232,19 +237,27 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
     }
 
     // Flow-style array: [item1, item2]
+    // Note: only handles single-line arrays without nested brackets.
+    // Values containing '[' or ']' inside (e.g. ["item]with]brackets"]) are
+    // intentionally left unparsed and will fall through to string handling.
     if (value.startsWith('[') && value.endsWith(']')) {
       const inner = value.slice(1, -1);
-      result[key] = inner.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
-      i++;
-      continue;
+      if (!inner.includes('[') && !inner.includes(']')) {
+        result[key] = inner.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+        i++;
+        continue;
+      }
+      // Nested brackets: fall through to string handling below
     }
 
-    // Block-style array (value is empty, next lines start with -)
+    // Block-style array (value is empty, next lines start with - optionally separated by blank lines)
     if (!value) {
       const arr: string[] = [];
       i++;
-      while (i < lines.length && lines[i].trim().startsWith('-')) {
-        arr.push(lines[i].trim().slice(1).trim().replace(/^["']|["']$/g, ''));
+      while (i < lines.length && (lines[i].trim().startsWith('-') || lines[i].trim() === '')) {
+        if (lines[i].trim().startsWith('-')) {
+          arr.push(lines[i].trim().slice(1).trim().replace(/^["']|["']$/g, ''));
+        }
         i++;
       }
       if (arr.length > 0) {
