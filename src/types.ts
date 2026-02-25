@@ -106,9 +106,8 @@ export function severityRank(severity: Severity): number {
 }
 
 /** Generates a unique finding ID */
-let _findingCounter = 0;
 export function nextFindingId(): string {
-  return `sr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${++_findingCounter}`;
+  return `sr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** A persisted review session (for history) */
