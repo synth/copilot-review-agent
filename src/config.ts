@@ -21,9 +21,13 @@ function isValidSeverity(s: unknown): s is Severity {
 
 /**
  * Loads the merged configuration from VS Code settings and .self-review.yml.
- * VS Code settings take precedence for baseBranch, targetBranch, severityThreshold.
- * .self-review.yml provides review-specific rules (categories, custom_instructions, etc.).
- * .self-review-instructions.md provides custom instructions as a markdown file (like CLAUDE.md).
+ *
+ * Precedence order (highest to lowest) for all settings:
+ *   1. VS Code user/workspace settings (only if explicitly set, not package.json defaults)
+ *   2. .self-review.yml values (including explicit empty arrays like `exclude_paths: []`)
+ *   3. Built-in defaults
+ *
+ * .self-review-instructions.md content is appended to any yaml custom_instructions.
  */
 export async function loadConfig(): Promise<SelfReviewConfig> {
   const vsConfig = vscode.workspace.getConfiguration('selfReview');
@@ -54,9 +58,9 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
     targetBranch: userTargetBranch ?? fileConfig.targetBranch ?? DEFAULT_CONFIG.targetBranch,
     includeUncommitted: userIncludeUncommitted ?? fileConfig.includeUncommitted ?? DEFAULT_CONFIG.includeUncommitted,
     severityThreshold: isValidSeverity(userSeverity) ? userSeverity : (fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold),
-    excludePaths: fileConfig.excludePaths.length > 0 ? fileConfig.excludePaths : (userExcludePaths ?? DEFAULT_CONFIG.excludePaths),
+    excludePaths: userExcludePaths ?? fileConfig.excludePaths ?? DEFAULT_CONFIG.excludePaths,
     maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
-    categories: fileConfig.categories.length > 0 ? fileConfig.categories : DEFAULT_CONFIG.categories,
+    categories: fileConfig.categories ?? DEFAULT_CONFIG.categories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings || DEFAULT_CONFIG.maxFindings,
   };
@@ -128,15 +132,15 @@ interface FileConfig {
   targetBranch?: string;
   includeUncommitted?: boolean;
   severityThreshold?: Severity;
-  excludePaths: string[];
+  excludePaths?: string[];
   maxFilesPerChunk?: number;
-  categories: Category[];
+  categories?: Category[];
   customInstructions?: string;
   maxFindings?: number;
 }
 
 async function loadYamlConfig(): Promise<FileConfig> {
-  const empty: FileConfig = { excludePaths: [], categories: [] };
+  const empty: FileConfig = {};
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
@@ -160,9 +164,9 @@ async function loadYamlConfig(): Promise<FileConfig> {
       targetBranch: parsed['target_branch'] as string | undefined,
       includeUncommitted: parsed['include_uncommitted'] as boolean | undefined,
       severityThreshold: parsed['severity_threshold'] as Severity | undefined,
-      excludePaths: Array.isArray(parsed['exclude_paths']) ? parsed['exclude_paths'] : [],
+      excludePaths: Array.isArray(parsed['exclude_paths']) ? parsed['exclude_paths'] : undefined,
       maxFilesPerChunk: parsed['max_files_per_chunk'] as number | undefined,
-      categories: Array.isArray(parsed['categories']) ? parsed['categories'] : [],
+      categories: Array.isArray(parsed['categories']) ? parsed['categories'] : undefined,
       customInstructions: parsed['custom_instructions'] as string | undefined,
       maxFindings: parsed['max_findings'] as number | undefined,
     };
