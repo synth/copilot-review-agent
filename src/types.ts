@@ -119,6 +119,8 @@ export interface ReviewSession {
   findings: ReviewFinding[];
   agentSteps: ReviewAgentStep[];
   summary?: ReviewSessionSummary;
+  /** True when the review was cancelled before all chunks were processed */
+  partial?: boolean;
 }
 
 export interface ReviewAgentStep {
@@ -135,5 +137,5 @@ export interface ReviewSessionSummary {
 
 /** Generates a unique review session ID */
 export function nextSessionId(): string {
-  return `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `review-${crypto.randomUUID()}`;
 }

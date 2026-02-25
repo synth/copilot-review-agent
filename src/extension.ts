@@ -67,13 +67,13 @@ export function activate(context: vscode.ExtensionContext) {
   // Helper: resolve a finding ID from various command sources
   function resolveFindingId(arg: unknown): string | undefined {
     if (typeof arg === 'string') { return arg; }
-    // From comment thread context
-    if (arg && typeof arg === 'object' && 'contextValue' in arg) {
-      return (arg as vscode.CommentThread).contextValue || undefined;
-    }
     // From tree item
     if (arg instanceof TaskListItem && arg.findingId) {
       return arg.findingId;
+    }
+    // From comment thread (check for CommentThread-specific shape)
+    if (arg && typeof arg === 'object' && 'comments' in arg && 'uri' in arg) {
+      return commentManager.findingIdFromThread(arg as vscode.CommentThread);
     }
     return undefined;
   }
@@ -297,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
       );
       if (overwrite !== 'Yes') { return; }
     }
-    fs.writeFileSync(configPath, generateSampleConfig(), 'utf-8');
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(configPath), Buffer.from(generateSampleConfig(), 'utf-8'));
     const doc = await vscode.workspace.openTextDocument(configPath);
     await vscode.window.showTextDocument(doc);
   });
@@ -458,8 +458,11 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'runReview': {
-                const payload = msg.payload as { baseBranch: string; targetBranch: string; modelId?: string };
-                if (payload.modelId) {
+                const payload = msg.payload as { baseBranch?: unknown; targetBranch?: unknown; modelId?: unknown };
+                if (typeof payload?.baseBranch !== 'string' || typeof payload?.targetBranch !== 'string') {
+                  break;
+                }
+                if (typeof payload.modelId === 'string' && payload.modelId) {
                   reviewEngine.setModel(payload.modelId);
                 }
                 await vscode.commands.executeCommand('selfReview.reviewBranch', {
@@ -475,7 +478,10 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'setModel': {
-                const modelId = msg.payload as string;
+                if (typeof msg.payload !== 'string' && msg.payload !== undefined) {
+                  break;
+                }
+                const modelId = msg.payload as string | undefined;
                 reviewEngine.setModel(modelId || undefined);
                 break;
               }
@@ -549,7 +555,10 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'openReview': {
-                const sessionId = msg.payload as string;
+                if (typeof msg.payload !== 'string') {
+                  break;
+                }
+                const sessionId = msg.payload;
                 const session = reviewStore.get(sessionId);
                 if (!session) {
                   vscode.window.showErrorMessage('Self Review: Review session not found.');
@@ -590,7 +599,10 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'deleteReview': {
-                const deleteId = msg.payload as string;
+                if (typeof msg.payload !== 'string') {
+                  break;
+                }
+                const deleteId = msg.payload;
                 await reviewStore.delete(deleteId);
                 // If we're viewing the deleted review, clear it
                 if (currentSessionId === deleteId) {
@@ -912,7 +924,9 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      if (token.isCancellationRequested) {
+      const wasCancelled = token.isCancellationRequested;
+
+      if (wasCancelled && allFindings.length === 0) {
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
         return;
@@ -922,7 +936,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Task: Post-processing
       // ────────────────────────────────
       const postTaskId = nextTaskId();
-      sidebar.addTask({ id: postTaskId, label: 'Finalizing review', status: 'running', collapsible: true });
+      sidebar.addTask({ id: postTaskId, label: wasCancelled ? 'Finalizing partial review' : 'Finalizing review', status: 'running', collapsible: true });
       legacyStep('Deduplicating findings', 'running');
 
       // Deduplicate
@@ -950,12 +964,18 @@ export function activate(context: vscode.ExtensionContext) {
       sidebar.updateTask({ id: postTaskId, status: 'done', detail: 'Done' });
 
       updateStatusBar('findings');
-      sidebar.setReviewState('done');
+      sidebar.setReviewState(wasCancelled ? 'done' : 'done');
 
       // Summary
       const openCount = deduped.filter(f => f.status === 'open').length;
       const fileCount = new Set(deduped.map(f => f.file)).size;
       sidebar.setReviewSummary(openCount, fileCount, deduped.length);
+
+      if (wasCancelled) {
+        vscode.window.showWarningMessage(
+          `Self Review: Cancelled after processing some chunks. ${deduped.length} finding(s) from completed chunks have been preserved.`
+        );
+      }
 
       // Persist
       const session: ReviewSession = {
@@ -966,6 +986,7 @@ export function activate(context: vscode.ExtensionContext) {
         findings: deduped,
         agentSteps,
         summary: { totalFindings: deduped.length, openCount, fileCount },
+        ...(wasCancelled ? { partial: true } : {}),
       };
       await reviewStore.save(session);
     } catch (err: unknown) {
