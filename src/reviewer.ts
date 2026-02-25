@@ -59,6 +59,26 @@ export class ReviewEngine {
   }
 
   /**
+   * Send a request to the model, retrying once with a fresh model if the
+   * cached reference has become stale (session expired, model uninstalled, etc.).
+   */
+  private async sendRequestWithRetry(
+    messages: vscode.LanguageModelChatMessage[],
+    options: vscode.LanguageModelChatRequestOptions,
+    token: vscode.CancellationToken
+  ): Promise<vscode.LanguageModelChatResponse> {
+    const model = await this.ensureModel();
+    try {
+      return await model.sendRequest(messages, options, token);
+    } catch (err) {
+      // Invalidate the cached model and retry once with a fresh selection
+      this.model = undefined;
+      const freshModel = await this.ensureModel();
+      return await freshModel.sendRequest(messages, options, token);
+    }
+  }
+
+  /**
    * Build the system prompt for the review.
    */
   private buildSystemPrompt(config: SelfReviewConfig): string {
@@ -120,17 +140,16 @@ If there are no findings, respond with: []`;
     token: vscode.CancellationToken,
     onToken?: (fragment: string) => void
   ): Promise<ReviewFinding[]> {
-    const model = await this.ensureModel();
     const systemPrompt = this.buildSystemPrompt(config);
     const chunkContext = buildChunkContext(chunk);
 
     const messages = [
-      vscode.LanguageModelChatMessage.User(
-        `${systemPrompt}\n\nReview the following code changes:\n\n${chunkContext}`
-      ),
+      vscode.LanguageModelChatMessage.User(systemPrompt),
+      vscode.LanguageModelChatMessage.Assistant('Understood. I will review the code changes following these instructions and respond with only a JSON array of findings.'),
+      vscode.LanguageModelChatMessage.User(`Review the following code changes:\n\n${chunkContext}`),
     ];
 
-    const response = await model.sendRequest(messages, {
+    const response = await this.sendRequestWithRetry(messages, {
       justification: 'Self Review: Analyzing branch diff for code issues',
     }, token);
 
@@ -141,6 +160,8 @@ If there are no findings, respond with: []`;
       fullText += fragment;
       if (onToken) { onToken(fragment); }
     }
+
+    if (token.isCancellationRequested) { return []; }
 
     return this.parseFindings(fullText, config);
   }
@@ -186,7 +207,7 @@ If there are no findings, respond with: []`;
       const threshold = severityRank(config.severityThreshold);
 
       return rawFindings
-        .filter(f => f.file && f.startLine && f.title)
+        .filter(f => f.file && f.startLine != null && f.title)
         .filter(f => severityRank((f.severity || 'low') as Severity) >= threshold)
         .slice(0, config.maxFindings)
         .map(f => ({
@@ -215,8 +236,6 @@ If there are no findings, respond with: []`;
     fileContent: string,
     token: vscode.CancellationToken
   ): Promise<string | undefined> {
-    const model = await this.ensureModel();
-
     // Truncate file content to a window around the relevant lines to avoid
     // exceeding the model's context window on very large files.
     const contextRadius = 100;
@@ -228,23 +247,25 @@ If there are no findings, respond with: []`;
     const truncatedContent = truncatedLines.join('\n');
     const wasTruncated = windowStart > 0 || windowEnd < lines.length;
 
-    const messages = [
-      vscode.LanguageModelChatMessage.User(
-        `You are a code fixer. Given a code review finding and the file content around the affected lines, generate the corrected code.
-
-## Finding
-- File: ${finding.file}
-- Lines: ${finding.startLine}-${finding.endLine}
-- Issue: ${finding.title}
-- Description: ${finding.description}
-${finding.suggestedFix ? `- Suggested approach: ${finding.suggestedFix}` : ''}
+    const systemInstruction = `You are a code fixer. Given a code review finding and the file content around the affected lines, generate the corrected code.
 
 ## Instructions
 - Output ONLY the replacement code for lines ${finding.startLine}-${finding.endLine}.
 - Do not include line numbers, markdown fences, or explanations.
 - The output should be a drop-in replacement that fixes the issue.
 - Preserve indentation and style of the surrounding code.
-- If the fix requires deleting the line(s) entirely with no replacement, output exactly: <<DELETE>>
+- If the fix requires deleting the line(s) entirely with no replacement, output exactly: <<DELETE>>`;
+
+    const messages = [
+      vscode.LanguageModelChatMessage.User(systemInstruction),
+      vscode.LanguageModelChatMessage.Assistant('Understood. I will output only the replacement code with no extra formatting.'),
+      vscode.LanguageModelChatMessage.User(
+        `## Finding
+- File: ${finding.file}
+- Lines: ${finding.startLine}-${finding.endLine}
+- Issue: ${finding.title}
+- Description: ${finding.description}
+${finding.suggestedFix ? `- Suggested approach: ${finding.suggestedFix}` : ''}
 
 ## File Content${wasTruncated ? ` (lines ${lineOffset}-${windowStart + truncatedLines.length} of ${lines.length})` : ''}
 \`\`\`
@@ -253,7 +274,7 @@ ${truncatedContent}
       ),
     ];
 
-    const response = await model.sendRequest(messages, {
+    const response = await this.sendRequestWithRetry(messages, {
       justification: 'Self Review: Generating fix for review finding',
     }, token);
 
