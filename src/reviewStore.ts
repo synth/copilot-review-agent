@@ -20,7 +20,7 @@ export class ReviewStore {
 
   /** Get a single review by ID */
   get(id: string): ReviewSession | undefined {
-    return this.getAll().find(r => r.id === id);
+    return this.state.get<ReviewSession[]>(STORAGE_KEY, []).find(r => r.id === id);
   }
 
   /** Save a new or updated review session */
