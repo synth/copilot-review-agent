@@ -345,7 +345,8 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await fixActions.fixInChat(finding, getWorkspaceFolder());
-    taskListProvider.updateFinding(findingId, { status: 'in-progress' });
+    commentManager.resolveFinding(findingId);
+    taskListProvider.updateFinding(findingId, { status: 'fixed' });
     updateStatusBar('findings');
     persistFindings();
   });
@@ -356,7 +357,8 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await fixActions.fixInEdits(finding, getWorkspaceFolder());
-    taskListProvider.updateFinding(findingId, { status: 'in-progress' });
+    commentManager.resolveFinding(findingId);
+    taskListProvider.updateFinding(findingId, { status: 'fixed' });
     updateStatusBar('findings');
     persistFindings();
   });
