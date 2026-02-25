@@ -12,13 +12,23 @@ import { DiffFile, DiffChunk, SelfReviewConfig } from './types';
  *   6 – Everything else
  */
 function filePriority(filePath: string): number {
-  const p = filePath.toLowerCase();
-  if (p.includes('controller') || p.includes('auth') || p.includes('authorization')) { return 0; }
-  if (p.includes('route') || p.includes('config/')) { return 1; }
-  if (p.includes('model') || p.includes('service') || p.includes('job')) { return 2; }
-  if (p.includes('migration') || p.includes('db/')) { return 3; }
-  if (p.includes('view') || p.includes('.erb') || p.includes('.html')) { return 4; }
-  if (p.includes('spec/') || p.includes('test/')) { return 5; }
+  const p = filePath.toLowerCase().replace(/\\/g, '/');
+  const segments = p.split('/').filter(Boolean);
+  const tokens = segments.flatMap(segment =>
+    segment.split(/[^a-z0-9]+/).filter(Boolean)
+  );
+
+  const hasToken = (value: string) => tokens.includes(value);
+  const hasAnyToken = (values: string[]) => values.some(hasToken);
+
+  // Tests/specs should always be lowest priority, even if they mention controllers/auth.
+  if (hasAnyToken(['test', 'tests', 'spec', 'specs'])) { return 5; }
+
+  if (hasAnyToken(['controller', 'controllers', 'auth', 'authorization'])) { return 0; }
+  if (hasAnyToken(['route', 'routes', 'config', 'configs'])) { return 1; }
+  if (hasAnyToken(['model', 'models', 'service', 'services', 'job', 'jobs'])) { return 2; }
+  if (hasAnyToken(['migration', 'migrations', 'db', 'database'])) { return 3; }
+  if (hasAnyToken(['view', 'views', 'template', 'templates']) || p.includes('.erb') || p.includes('.html')) { return 4; }
   return 6;
 }
 

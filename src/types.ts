@@ -125,6 +125,7 @@ export interface ReviewSession {
   timestamp: number;
   baseBranch: string;
   targetBranch: string;
+  modelId?: string;
   findings: ReviewFinding[];
   agentSteps: ReviewAgentStep[];
   summary?: ReviewSessionSummary;

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { BranchSelection, ReviewFinding } from './types';
 import { loadConfig, generateSampleConfig, getInstructionsFilePath, INSTRUCTIONS_FILENAME, generateSampleInstructions } from './config';
 import { GitDiffEngine, pickBaseBranch, pickTargetBranch } from './git';
+import { resetWarnings } from './minimatch';
 import { chunkDiffFiles } from './chunker';
 import { ReviewEngine } from './reviewer';
 import { CommentManager } from './comments';
@@ -122,6 +123,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (args?.baseBranch) {
         // Called from sidebar with pre-selected branches
         baseBranch = args.baseBranch;
+        // Empty string means "HEAD + working tree" for in-progress changes.
         targetBranch = args.targetBranch ?? '';
       } else {
         // Fallback: prompt via QuickPick
@@ -561,11 +563,22 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'setModel': {
-                if (msg.payload !== undefined && typeof msg.payload !== 'string') {
+                if (msg.payload === undefined) {
+                  reviewEngine.setModel(undefined);
                   break;
                 }
-                const modelId = msg.payload as string | undefined;
-                reviewEngine.setModel(modelId || undefined);
+                if (typeof msg.payload !== 'string') {
+                  break;
+                }
+                const modelId = msg.payload.trim();
+                if (!modelId) {
+                  reviewEngine.setModel(undefined);
+                  break;
+                }
+                const models = await reviewEngine.listModels();
+                if (models.some(m => m.id === modelId)) {
+                  reviewEngine.setModel(modelId);
+                }
                 break;
               }
               case 'clearReview': {
@@ -646,6 +659,12 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!session) {
                   vscode.window.showErrorMessage('Self Review: Review session not found.');
                   break;
+                }
+                if (session.modelId) {
+                  const models = await reviewEngine.listModels();
+                  if (models.some(m => m.id === session.modelId)) {
+                    reviewEngine.setModel(session.modelId);
+                  }
                 }
                 // Load this session's findings into the tree view and comments
                 commentManager.clearAll();
@@ -808,6 +827,14 @@ export function activate(context: vscode.ExtensionContext) {
     sidebar: SidebarViewProvider,
     filePaths?: string[]
   ): Promise<void> {
+    // Reset module-level state for this review session to ensure warnings fire correctly
+    resetWarnings();
+
+    if (activeTokenSource) {
+      activeTokenSource.cancel();
+      activeTokenSource.dispose();
+      activeTokenSource = undefined;
+    }
     updateStatusBar('reviewing');
     sidebar.setReviewState('reviewing');
 
@@ -1065,6 +1092,7 @@ export function activate(context: vscode.ExtensionContext) {
         timestamp: Date.now(),
         baseBranch: selection.baseBranch,
         targetBranch: selection.targetBranch,
+        modelId: reviewer.selectedModelId,
         findings: deduped,
         agentSteps,
         summary: { totalFindings: deduped.length, openCount, fileCount },
@@ -1091,9 +1119,42 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
   const seen = new Set<string>();
   const result: ReviewFinding[] = [];
 
+  const normalizeTitleTokens = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+  const titleSimilarity = (a: string[], b: string[]): number => {
+    if (a.length === 0 || b.length === 0) { return 0; }
+    const aSet = new Set(a);
+    const bSet = new Set(b);
+    let intersection = 0;
+    for (const token of aSet) {
+      if (bSet.has(token)) { intersection++; }
+    }
+    const union = aSet.size + bSet.size - intersection;
+    return union === 0 ? 0 : intersection / union;
+  };
+
+  const rangesOverlap = (aStart: number, aEnd: number, bStart: number, bEnd: number): boolean =>
+    aStart <= bEnd && aEnd >= bStart;
+
   for (const f of findings) {
-    const key = `${f.file}:${f.startLine}:${f.title.toLowerCase()}`;
+    const normalizedTokens = normalizeTitleTokens(f.title);
+    const normalizedTitle = normalizedTokens.join(' ');
+    const key = `${f.file}:${f.startLine}:${f.endLine}:${normalizedTitle}`;
     if (seen.has(key)) { continue; }
+
+    const hasNearDuplicate = result.some(r =>
+      r.file === f.file
+      && rangesOverlap(r.startLine, r.endLine, f.startLine, f.endLine)
+      && titleSimilarity(normalizeTitleTokens(r.title), normalizedTokens) >= 0.6
+    );
+    if (hasNearDuplicate) { continue; }
+
     seen.add(key);
     result.push(f);
   }
@@ -1105,4 +1166,5 @@ export function deactivate() {
   // Cancel any in-flight AI request
   activeTokenSource?.cancel();
   activeTokenSource?.dispose();
+  activeTokenSource = undefined;
 }

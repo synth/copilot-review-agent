@@ -51,10 +51,20 @@ export class ReviewEngine {
       }
     }
 
-    // Auto-select: prefer a larger model
-    this.model = models.find(m => m.family.includes('claude') || m.family.includes('gpt-4'))
-      || models[0];
+    // Auto-select: prefer models by explicit priority (claude > gpt-4 > others).
+    // This is more robust than substring matching on family names, which could
+    // inadvertently match unintended models (e.g., 'gpt-4-mini' or 'claude-instant').
+    const modelPreference = ['claude', 'gpt-4'];
+    for (const pattern of modelPreference) {
+      const candidate = models.find(m => m.family === pattern);
+      if (candidate) {
+        this.model = candidate;
+        return this.model;
+      }
+    }
 
+    // Fall back to first available model if no preferred model is found
+    this.model = models[0];
     return this.model;
   }
 
@@ -74,9 +84,17 @@ export class ReviewEngine {
       // Only retry on errors that suggest a stale model reference (e.g. session
       // expired, model uninstalled). Do NOT retry cancellations or quota/rate-limit
       // errors — those would silently re-execute a full LLM call at extra cost.
-      const isStale = err?.code === 'model-not-found';
+      // Check multiple error properties for compatibility across API versions:
+      // - err.code: primary indicator (e.g., 'model-not-found')
+      // - err.name: alternative error classification
+      // Note: other transient failures (network, auth token expiration) are not
+      // currently retried; consider adding more error codes if needed.
+      const isStale = (
+        err?.code === 'model-not-found' ||
+        err?.name === 'ModelNotFoundError'
+      );
       if (!isStale || token.isCancellationRequested) { throw err; }
-      console.warn('Self Review: Model reference stale, retrying with fresh model', err?.code);
+      console.warn('Self Review: Model reference stale, retrying with fresh model', err?.code || err?.name);
       this.model = undefined;
       const freshModel = await this.ensureModel();
       return await freshModel.sendRequest(messages, options, token);
@@ -148,6 +166,11 @@ If there are no findings, respond with: []`;
     const systemPrompt = this.buildSystemPrompt(config);
     const chunkContext = buildChunkContext(chunk);
 
+    // Note: The VS Code Language Model Chat API does not currently expose a
+    // dedicated System message role for most models. As a workaround, we send
+    // the system instructions as a User message, followed by an Assistant
+    // acknowledgment and the actual review request. This pattern ensures the
+    // model understands the instructions while maintaining compatibility.
     const messages = [
       vscode.LanguageModelChatMessage.User(systemPrompt),
       vscode.LanguageModelChatMessage.Assistant('Understood. I will review the code changes following these instructions and respond with only a JSON array of findings.'),

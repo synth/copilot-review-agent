@@ -111,6 +111,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ): void {
+    // Clear any stale state from a previous resolution. This ensures that if
+    // resolveWebviewView is called again (e.g., sidebar hidden and re-shown)
+    // before the old webview's onDidDispose fires, we don't hold stale references.
+    this._pendingMessages = [];
+    this._webviewReady = false;
+
     this._view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
@@ -130,6 +136,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
       }
       this._pendingMessages = [];
     };
+    // Note: This listener only acts on 'ready' messages. Other messages sent by the
+    // webview before the main handler (registered by the extension host) is set up
+    // will still fire to other listeners. To avoid losing messages like 'loadHistory',
+    // the extension host must register its onDidReceiveMessage handler synchronously
+    // in the onDidResolveView callback.
     const readyListener = webviewView.webview.onDidReceiveMessage((msg: ExtensionMessage) => {
       if (msg.type === 'ready') {
         clearTimeout(readyTimeout);
@@ -246,6 +257,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   // HTML
   // ────────────────────────────────────────────────
   private _getHtml(): string {
+    // Note: HTML is read fresh on each call rather than cached. This ensures:
+    // 1. During development, changes to media/sidebar.html take effect without
+    //    restarting the extension host.
+    // 2. In production, if the extension is updated and the extension host persists,
+    //    we serve the new HTML rather than stale cached content.
+    // The file read is fast and infrequent (only when the sidebar is shown), so
+    // caching provides minimal perf benefit.
     const nonce = getNonce();
     const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
     const html = fs.readFileSync(htmlPath, 'utf8');

@@ -194,6 +194,7 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = content.split('\n');
   let i = 0;
+  let warnedIndentedTopLevel = false;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -207,6 +208,12 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
 
     // Only parse top-level mapping entries; ignore indented lines here.
     if (/^\s/.test(line)) {
+      if (!warnedIndentedTopLevel && /^\s+[A-Za-z0-9_-]+\s*:\s*.*$/.test(line)) {
+        warnedIndentedTopLevel = true;
+        vscode.window.showWarningMessage(
+          'Self Review: Ignoring indented top-level YAML keys in .self-review.yml. Remove leading spaces to apply those settings.'
+        );
+      }
       i++;
       continue;
     }
@@ -258,17 +265,26 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
       // Nested brackets: fall through to string handling below
     }
 
-    // Block-style array (value is empty, next lines start with - optionally separated by blank lines)
+    // Block-style array (value is empty, next lines are indented list items)
     if (!value) {
-      const arr: string[] = [];
-      i++;
-      while (i < lines.length && (lines[i].trim().startsWith('-') || lines[i].trim() === '')) {
-        if (lines[i].trim().startsWith('-')) {
-          arr.push(lines[i].trim().slice(1).trim().replace(/^["']|["']$/g, ''));
-        }
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === '') { j++; }
+
+      if (j < lines.length && /^\s+-/.test(lines[j])) {
+        const arr: string[] = [];
         i++;
+        while (i < lines.length && (/^\s+-/.test(lines[i]) || lines[i].trim() === '')) {
+          if (/^\s+-/.test(lines[i])) {
+            arr.push(lines[i].trim().slice(1).trim().replace(/^["']|["']$/g, ''));
+          }
+          i++;
+        }
+        result[key] = arr;
+        continue;
       }
-      result[key] = arr;
+
+      result[key] = '';
+      i++;
       continue;
     }
 
