@@ -165,6 +165,10 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
   }
 
   private groupBySeverity(): TaskListItem[] {
+    // 'nit' is intentionally kept here even though the default severityThreshold
+    // is 'low' (which filters nit findings during review). Findings from older
+    // stored data or a user-configured lower threshold can include 'nit', and
+    // displaying them is safer than silently dropping them.
     const severityOrder: Severity[] = ['blocker', 'high', 'medium', 'low', 'nit'];
     const groups: TaskListItem[] = [];
 
