@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { ReviewFinding } from './types';
 import { ReviewEngine } from './reviewer';
@@ -19,12 +18,13 @@ export class FixActions {
    */
   async fixInline(finding: ReviewFinding): Promise<boolean> {
     const filePath = path.join(this.workspaceFolder.uri.fsPath, finding.file);
-    if (!fs.existsSync(filePath)) {
+    const uri = vscode.Uri.file(filePath);
+    try {
+      await vscode.workspace.fs.stat(uri);
+    } catch {
       vscode.window.showErrorMessage(`File not found: ${finding.file}`);
       return false;
     }
-
-    const uri = vscode.Uri.file(filePath);
     const doc = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(doc);
 
