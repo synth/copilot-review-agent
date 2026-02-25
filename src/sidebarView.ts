@@ -89,10 +89,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _pendingMessages: WebviewMessage[] = [];
-  private _htmlCache?: string;
 
   private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
-  /** Fires when the webview view is resolved and ready for messages. */
+  /** Fires when the webview view is resolved and ready for messages.
+   * Consumers should register webview message handlers synchronously in this callback
+   * to avoid missing early messages from the webview.
+   */
   public readonly onDidResolveView = this._onDidResolveView.event;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
@@ -138,6 +140,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     webviewView.onDidDispose(() => {
       clearTimeout(readyTimeout);
       readyListener.dispose();
+      this._view = undefined;
+      this._webviewReady = false;
+      this._pendingMessages = [];
     });
 
     this._onDidResolveView.fire(webviewView);
@@ -242,11 +247,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   // ────────────────────────────────────────────────
   private _getHtml(): string {
     const nonce = getNonce();
-    if (!this._htmlCache) {
-      const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
-      this._htmlCache = fs.readFileSync(htmlPath, 'utf8');
-    }
-    return this._htmlCache.replace(/\{\{NONCE\}\}/g, nonce);
+    const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    return html.replace(/\{\{NONCE\}\}/g, nonce);
   }
 }
 

@@ -65,6 +65,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Fix action handler (stateless – workspace folder is resolved per call)
   const fixActions = new FixActions(reviewEngine);
 
+  function normalizeFsPathToWorkspace(fsPath: string, wsFolder: vscode.WorkspaceFolder): string {
+    return path.relative(wsFolder.uri.fsPath, fsPath).split(path.sep).join('/');
+  }
+
   // Helper: resolve a finding ID from various command sources
   function resolveFindingId(arg: unknown): string | undefined {
     if (typeof arg === 'string') { return arg; }
@@ -74,7 +78,31 @@ export function activate(context: vscode.ExtensionContext) {
     }
     // From comment thread (check for CommentThread-specific shape)
     if (arg && typeof arg === 'object' && 'comments' in arg && 'uri' in arg) {
-      return commentManager.findingIdFromThread(arg as vscode.CommentThread);
+      const thread = arg as vscode.CommentThread;
+      const mapped = commentManager.findingIdFromThread(thread);
+      if (mapped) { return mapped; }
+
+      // Fallback: match by file path and range if the thread mapping is missing.
+      try {
+        const wsFolder = getWorkspaceFolder();
+        const file = normalizeFsPathToWorkspace(thread.uri.fsPath, wsFolder);
+        const startLine = thread.range?.start.line;
+        const endLine = thread.range?.end.line;
+        if (startLine == null || endLine == null) { return undefined; }
+
+        const findings = taskListProvider.getFindings();
+        const exact = findings.find(f =>
+          f.file === file && f.startLine - 1 === startLine && f.endLine - 1 === endLine
+        );
+        if (exact) { return exact.id; }
+
+        const overlapping = findings.find(f =>
+          f.file === file && (f.startLine - 1) <= endLine && (f.endLine - 1) >= startLine
+        );
+        return overlapping?.id;
+      } catch {
+        return undefined;
+      }
     }
     return undefined;
   }
@@ -334,7 +362,7 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMENT THREAD ACTIONS: Skip, Fix Inline, Fix in Chat, Fix in Edits
   // ============================================================
   const skipFindingCmd = vscode.commands.registerCommand('selfReview.skipFinding', (thread: vscode.CommentThread) => {
-    const findingId = commentManager.findingIdFromThread(thread);
+    const findingId = resolveFindingId(thread);
     if (findingId) {
       commentManager.resolveFinding(findingId);
       taskListProvider.updateFinding(findingId, { status: 'skipped' });
@@ -344,40 +372,43 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const fixInlineCmd = vscode.commands.registerCommand('selfReview.fixInline', async (thread: vscode.CommentThread) => {
-    const findingId = commentManager.findingIdFromThread(thread);
+    const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
 
     const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
     if (initiated) {
-      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
+      commentManager.resolveFinding(findingId);
+      taskListProvider.updateFinding(findingId, { status: 'fixed' });
       updateStatusBar('findings');
       persistFindings();
     }
   });
 
   const fixInChatCmd = vscode.commands.registerCommand('selfReview.fixInChat', async (thread: vscode.CommentThread) => {
-    const findingId = commentManager.findingIdFromThread(thread);
+    const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     const initiated = await fixActions.fixInChat(finding, getWorkspaceFolder());
     if (initiated) {
-      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
+      commentManager.resolveFinding(findingId);
+      taskListProvider.updateFinding(findingId, { status: 'fixed' });
       updateStatusBar('findings');
       persistFindings();
     }
   });
 
   const fixInEditsCmd = vscode.commands.registerCommand('selfReview.fixInEdits', async (thread: vscode.CommentThread) => {
-    const findingId = commentManager.findingIdFromThread(thread);
+    const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     const initiated = await fixActions.fixInEdits(finding, getWorkspaceFolder());
     if (initiated) {
-      taskListProvider.updateFinding(findingId, { status: 'in-progress' });
+      commentManager.resolveFinding(findingId);
+      taskListProvider.updateFinding(findingId, { status: 'fixed' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -423,7 +454,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
     if (initiated) {
-      taskListProvider.updateFinding(item.findingId, { status: 'in-progress' });
+      commentManager.resolveFinding(item.findingId);
+      taskListProvider.updateFinding(item.findingId, { status: 'fixed' });
       updateStatusBar('findings');
       persistFindings();
     }
@@ -432,9 +464,14 @@ export function activate(context: vscode.ExtensionContext) {
   const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
     if (!item.filePath) { return; }
     const findings = taskListProvider.getFileFindings(item.filePath);
-    // fixAllInFile only opens a Copilot Chat session — it doesn't actually apply fixes.
-    // Don't auto-mark findings as fixed; let the user resolve them manually.
     await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
+
+    for (const finding of findings) {
+      commentManager.resolveFinding(finding.id);
+      taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+    }
+    updateStatusBar('findings');
+    persistFindings();
   });
 
   // ============================================================
@@ -506,7 +543,10 @@ export function activate(context: vscode.ExtensionContext) {
                   break;
                 }
                 if (typeof payload.modelId === 'string' && payload.modelId) {
-                  reviewEngine.setModel(payload.modelId);
+                  const models = await reviewEngine.listModels();
+                  if (models.some(m => m.id === payload.modelId)) {
+                    reviewEngine.setModel(payload.modelId);
+                  }
                 }
                 await vscode.commands.executeCommand('selfReview.reviewBranch', {
                   baseBranch: payload.baseBranch,
