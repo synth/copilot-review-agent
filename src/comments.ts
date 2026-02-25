@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewFinding, severityIcon } from './types';
+import { ReviewFinding } from './types';
 
 /**
  * Manages inline review comments in the editor using the VS Code Comment Controller API.
