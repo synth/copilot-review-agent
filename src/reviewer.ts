@@ -10,7 +10,7 @@ export class ReviewEngine {
   private _selectedModelId: string | undefined;
 
   /**
-   * Set a specific model by ID (family string).
+   * Set a specific model by ID (the `id` property of `vscode.LanguageModelChat`).
    * Pass undefined to reset to auto-selection.
    */
   setModel(modelId: string | undefined): void {
@@ -70,8 +70,12 @@ export class ReviewEngine {
     const model = await this.ensureModel();
     try {
       return await model.sendRequest(messages, options, token);
-    } catch (err) {
-      // Invalidate the cached model and retry once with a fresh selection
+    } catch (err: any) {
+      // Only retry on errors that suggest a stale model reference (e.g. session
+      // expired, model uninstalled). Do NOT retry cancellations or quota/rate-limit
+      // errors — those would silently re-execute a full LLM call at extra cost.
+      const isStale = err?.code === 'model-not-found' || err?.message?.includes('not available');
+      if (!isStale || token.isCancellationRequested) { throw err; }
       this.model = undefined;
       const freshModel = await this.ensureModel();
       return await freshModel.sendRequest(messages, options, token);
@@ -182,50 +186,62 @@ If there are no findings, respond with: []`;
     }
     cleaned = cleaned.trim();
 
-    // Try to find JSON array in the response
-    const arrayStart = cleaned.indexOf('[');
-    const arrayEnd = cleaned.lastIndexOf(']');
-    if (arrayStart === -1 || arrayEnd === -1) {
-      return [];
-    }
-    cleaned = cleaned.slice(arrayStart, arrayEnd + 1);
+    // First, try to parse the cleaned text directly as JSON.
+    // Fall back to a bracket-search heuristic only if that fails, to avoid
+    // incorrectly slicing strings that contain nested arrays or trailing text.
+    let rawFindings: Array<{
+      file?: string;
+      startLine?: number;
+      endLine?: number;
+      severity?: string;
+      title?: string;
+      description?: string;
+      suggestedFix?: string;
+      category?: string;
+    }>;
 
     try {
-      const rawFindings = JSON.parse(cleaned) as Array<{
-        file?: string;
-        startLine?: number;
-        endLine?: number;
-        severity?: string;
-        title?: string;
-        description?: string;
-        suggestedFix?: string;
-        category?: string;
-      }>;
-
-      if (!Array.isArray(rawFindings)) { return []; }
-
-      const threshold = severityRank(config.severityThreshold);
-
-      return rawFindings
-        .filter(f => f.file && f.startLine != null && f.title)
-        .filter(f => severityRank((f.severity || 'low') as Severity) >= threshold)
-        .slice(0, config.maxFindings)
-        .map(f => ({
-          id: nextFindingId(),
-          file: f.file!,
-          startLine: f.startLine!,
-          endLine: f.endLine || f.startLine!,
-          severity: (f.severity || 'medium') as Severity,
-          title: f.title!,
-          description: f.description || '',
-          suggestedFix: f.suggestedFix,
-          category: (f.category || 'other') as Category,
-          status: 'open' as const,
-        }));
-    } catch (err) {
-      vscode.window.showWarningMessage(`Self Review: Failed to parse AI response: ${err}`);
-      return [];
+      const direct = JSON.parse(cleaned);
+      if (Array.isArray(direct)) {
+        rawFindings = direct;
+      } else {
+        return [];
+      }
+    } catch {
+      // Direct parse failed — try to extract the outermost JSON array via bracket search
+      const arrayStart = cleaned.indexOf('[');
+      const arrayEnd = cleaned.lastIndexOf(']');
+      if (arrayStart === -1 || arrayEnd === -1) {
+        return [];
+      }
+      try {
+        const extracted = JSON.parse(cleaned.slice(arrayStart, arrayEnd + 1));
+        if (!Array.isArray(extracted)) { return []; }
+        rawFindings = extracted;
+      } catch (err) {
+        vscode.window.showWarningMessage(`Self Review: Failed to parse AI response: ${err}`);
+        return [];
+      }
     }
+
+    const threshold = severityRank(config.severityThreshold);
+
+    return rawFindings
+      .filter(f => f.file && f.startLine != null && f.title)
+      .filter(f => severityRank((f.severity || 'low') as Severity) >= threshold)
+      .slice(0, config.maxFindings)
+      .map(f => ({
+        id: nextFindingId(),
+        file: f.file!,
+        startLine: f.startLine!,
+        endLine: f.endLine || f.startLine!,
+        severity: (f.severity || 'medium') as Severity,
+        title: f.title!,
+        description: f.description || '',
+        suggestedFix: f.suggestedFix,
+        category: (f.category || 'other') as Category,
+        status: 'open' as const,
+      }));
   }
 
   /**
@@ -241,6 +257,8 @@ If there are no findings, respond with: []`;
     const contextRadius = 100;
     const lines = fileContent.split('\n');
     const windowStart = Math.max(0, finding.startLine - 1 - contextRadius);
+    // finding.endLine is 1-based; slice's end is exclusive. The two offset
+    // directions cancel out, so `endLine + contextRadius` is intentionally correct.
     const windowEnd = Math.min(lines.length, finding.endLine + contextRadius);
     const truncatedLines = lines.slice(windowStart, windowEnd);
     const lineOffset = windowStart + 1; // 1-based line number of first included line
