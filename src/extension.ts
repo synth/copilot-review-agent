@@ -403,8 +403,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ============================================================
   function setupSidebarMessageHandler(): void {
+    let messageListenerDisposable: vscode.Disposable | undefined;
+
     function registerHandler(webviewView: vscode.WebviewView): void {
-        webviewView.webview.onDidReceiveMessage(
+        // Dispose any previous listener to avoid duplicate message handling
+        messageListenerDisposable?.dispose();
+
+        messageListenerDisposable = webviewView.webview.onDidReceiveMessage(
           async (msg: ExtensionMessage) => {
             switch (msg.type) {
               case 'loadHistory': {
@@ -511,7 +516,7 @@ export function activate(context: vscode.ExtensionContext) {
               case 'createInstructions': {
                 try {
                   const wsFolder = getWorkspaceFolder();
-                  const filePath = vscode.Uri.file(`${wsFolder}/${INSTRUCTIONS_FILENAME}`);
+                  const filePath = vscode.Uri.file(path.join(wsFolder.uri.fsPath, INSTRUCTIONS_FILENAME));
                   const content = generateSampleInstructions();
                   await vscode.workspace.fs.writeFile(filePath, Buffer.from(content, 'utf-8'));
                   const doc = await vscode.workspace.openTextDocument(filePath);
@@ -581,8 +586,6 @@ export function activate(context: vscode.ExtensionContext) {
               }
             }
           },
-          undefined,
-          context.subscriptions
         );
         // Proactively send history so the webview has data immediately
         sendHistory();
