@@ -217,9 +217,20 @@ If there are no findings, respond with: []`;
   ): Promise<string | undefined> {
     const model = await this.ensureModel();
 
+    // Truncate file content to a window around the relevant lines to avoid
+    // exceeding the model's context window on very large files.
+    const contextRadius = 100;
+    const lines = fileContent.split('\n');
+    const windowStart = Math.max(0, finding.startLine - 1 - contextRadius);
+    const windowEnd = Math.min(lines.length, finding.endLine + contextRadius);
+    const truncatedLines = lines.slice(windowStart, windowEnd);
+    const lineOffset = windowStart + 1; // 1-based line number of first included line
+    const truncatedContent = truncatedLines.join('\n');
+    const wasTruncated = windowStart > 0 || windowEnd < lines.length;
+
     const messages = [
       vscode.LanguageModelChatMessage.User(
-        `You are a code fixer. Given a code review finding and the full file content, generate the corrected code.
+        `You are a code fixer. Given a code review finding and the file content around the affected lines, generate the corrected code.
 
 ## Finding
 - File: ${finding.file}
@@ -235,9 +246,9 @@ ${finding.suggestedFix ? `- Suggested approach: ${finding.suggestedFix}` : ''}
 - Preserve indentation and style of the surrounding code.
 - If the fix requires deleting the line(s) entirely with no replacement, output exactly: <<DELETE>>
 
-## Full File Content
+## File Content${wasTruncated ? ` (lines ${lineOffset}-${windowStart + truncatedLines.length} of ${lines.length})` : ''}
 \`\`\`
-${fileContent}
+${truncatedContent}
 \`\`\``
       ),
     ];
