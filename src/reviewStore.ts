@@ -56,6 +56,7 @@ export class ReviewStore {
   /** Update findings for a session (when user skips/fixes items) */
   async updateFindings(sessionId: string, findings: ReviewFinding[]): Promise<void> {
     const all = this.state.get<ReviewSession[]>(STORAGE_KEY, []);
+    if (!all.some(r => r.id === sessionId)) { return; }
     const openCount = findings.filter(f => f.status === 'open').length;
     const fileCount = new Set(findings.map(f => f.file)).size;
     const allCopy = all.map(r => r.id === sessionId ? {
@@ -67,8 +68,6 @@ export class ReviewStore {
         fileCount,
       },
     } : r);
-
-    if (!allCopy.some(r => r.id === sessionId)) { return; }
 
     await this.state.update(STORAGE_KEY, allCopy);
   }

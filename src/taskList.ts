@@ -3,7 +3,9 @@ import { ReviewFinding, severityIcon, severityRank, Severity } from './types';
 
 /** Apply Unicode combining long stroke overlay (U+0336) to every character. */
 function strikeThrough(text: string): string {
-  return [...text].map(ch => ch + '\u0336').join('');
+  return Array.from(new Intl.Segmenter().segment(text))
+    .map(({ segment }) => segment + '\u0336')
+    .join('');
 }
 
 /**

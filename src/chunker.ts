@@ -36,12 +36,13 @@ function buildFileContext(file: DiffFile, contextLines: number = 30): string {
       const start = Math.max(0, hunk.newStart - 1 - contextLines);
       const end = Math.min(fileLines.length, hunk.newStart - 1 + hunk.newLines + contextLines);
       const contextSlice = fileLines.slice(start, end);
+      const addedSet = new Set(hunk.addedLines);
 
       parts.push(`\n### Hunk at line ${hunk.newStart} ${hunk.header}`);
       parts.push('```');
       contextSlice.forEach((line, idx) => {
         const lineNum = start + idx + 1;
-        const isAdded = hunk.addedLines.includes(lineNum);
+        const isAdded = addedSet.has(lineNum);
         const prefix = isAdded ? '+' : ' ';
         parts.push(`${prefix}${String(lineNum).padStart(5)} | ${line}`);
       });
