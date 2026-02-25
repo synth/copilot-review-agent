@@ -617,14 +617,14 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
             ' <span class="arrow">←</span> ' +
             '<span class="branch-tag">' + esc(target) + '</span>' +
           '</span>' +
-          '<span class="hi-date">' + dateStr + '</span>' +
+          '<span class="hi-date">' + esc(dateStr) + '</span>' +
         '</div>' +
         '<div class="hi-stats">' +
           '<span class="hi-badge ' + (hasOpen ? 'open' : 'clear') + '">' +
-            (hasOpen ? item.openCount + ' open' : 'clear') + '</span>' +
-          item.totalFindings + ' finding' + (item.totalFindings !== 1 ? 's' : '') +
-          ' in ' + item.fileCount + ' file' + (item.fileCount !== 1 ? 's' : '') +
-          '<button class="hi-delete" data-id="' + item.id + '" title="Delete review">✕</button>' +
+            (hasOpen ? esc(String(item.openCount)) + ' open' : 'clear') + '</span>' +
+          esc(String(item.totalFindings)) + ' finding' + (item.totalFindings !== 1 ? 's' : '') +
+          ' in ' + esc(String(item.fileCount)) + ' file' + (item.fileCount !== 1 ? 's' : '') +
+          '<button class="hi-delete" data-id="' + esc(String(item.id)) + '" title="Delete review">✕</button>' +
         '</div>';
       el.addEventListener('click', (e) => {
         if (e.target.classList.contains('hi-delete')) return;
