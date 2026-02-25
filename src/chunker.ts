@@ -2,8 +2,14 @@
 import { DiffFile, DiffChunk, SelfReviewConfig } from './types';
 
 /**
- * Priority ordering for file review.
- * Security-sensitive files get reviewed first.
+ * Priority ordering for file review (lower number = reviewed first).
+ *   0 – Security-sensitive (controllers, auth)
+ *   1 – Routing / configuration
+ *   2 – Domain logic (models, services, jobs)
+ *   3 – Database (migrations, db/)
+ *   4 – Views / templates
+ *   5 – Tests / specs
+ *   6 – Everything else
  */
 function filePriority(filePath: string): number {
   const p = filePath.toLowerCase();
@@ -11,9 +17,9 @@ function filePriority(filePath: string): number {
   if (p.includes('route') || p.includes('config/')) { return 1; }
   if (p.includes('model') || p.includes('service') || p.includes('job')) { return 2; }
   if (p.includes('migration') || p.includes('db/')) { return 3; }
-  if (p.includes('spec/') || p.includes('test/')) { return 5; }
   if (p.includes('view') || p.includes('.erb') || p.includes('.html')) { return 4; }
-  return 4;
+  if (p.includes('spec/') || p.includes('test/')) { return 5; }
+  return 6;
 }
 
 /**
