@@ -92,6 +92,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
   dispose(): void {
     this._onDidResolveView.dispose();
+    this._view = undefined;
+    this._pendingMessages = [];
   }
 
   resolveWebviewView(
@@ -154,9 +156,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   streamToken(taskId: string, subStepId: string, token: string): void {
     this.postMessage({ type: 'streamToken', payload: { taskId, subStepId, token } });
   }
+  private legacyIdCounter = 0;
   /** Legacy compat for history replays */
   addAgentStep(step: AgentStep): void {
-    const id = 'legacy-' + step.label.replace(/[^a-zA-Z0-9]/g, '_');
+    const id = 'legacy-' + step.label.replace(/[^a-zA-Z0-9]/g, '_') + '-' + (this.legacyIdCounter++);
     this.addTask({
       id, label: step.label,
       status: step.status === 'pending' ? 'running' : step.status as 'running' | 'done' | 'error',
@@ -808,55 +811,61 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     }
   }
 
+  function renderSubStepLabel(labelEl, data) {
+    labelEl.textContent = data.label;
+    if (data.detail) {
+      const d = document.createElement('span'); d.className = 'ss-detail';
+      d.textContent = data.detail; labelEl.appendChild(d);
+    }
+    if (data.stream) {
+      const s = document.createElement('span'); s.className = 'ss-stream';
+      s.textContent = data.stream; labelEl.appendChild(s);
+    }
+  }
+
   function handleAddSubStep(step) {
     const t = tasks.get(step.taskId);
     if (!t) return;
     const el = document.createElement('div');
     el.className = 'sub-step';
     el.id = 'ss-' + step.taskId + '-' + step.id;
+    const data = { label: step.label, detail: step.detail || '', status: step.status, stream: '' };
     el.innerHTML =
       '<span class="ss-icon">' + statusIcon(step.status, true) + '</span>' +
-      '<span class="ss-label">' + esc(step.label) +
-        (step.detail ? '<span class="ss-detail">' + esc(step.detail) + '</span>' : '') +
-      '</span>';
+      '<span class="ss-label"></span>';
+    renderSubStepLabel(el.querySelector('.ss-label'), data);
     t.subStepsEl.appendChild(el);
-    t.subSteps.set(step.id, el);
+    t.subSteps.set(step.id, { el, data });
     scrollToBottom();
   }
 
   function handleUpdateSubStep(update) {
     const t = tasks.get(update.taskId);
     if (!t) return;
-    const el = t.subSteps.get(update.id);
-    if (!el) return;
-    if (update.status) el.querySelector('.ss-icon').innerHTML = statusIcon(update.status, true);
-    if (update.label) {
-      const labelEl = el.querySelector('.ss-label');
-      const detailSpan = labelEl.querySelector('.ss-detail');
-      const streamSpan = labelEl.querySelector('.ss-stream');
-      labelEl.textContent = update.label;
-      if (update.detail) {
-        const d = document.createElement('span'); d.className = 'ss-detail';
-        d.textContent = update.detail; labelEl.appendChild(d);
-      } else if (detailSpan) labelEl.appendChild(detailSpan);
-      if (streamSpan) labelEl.appendChild(streamSpan);
+    const entry = t.subSteps.get(update.id);
+    if (!entry) return;
+    const { el, data } = entry;
+    if (update.status) {
+      data.status = update.status;
+      el.querySelector('.ss-icon').innerHTML = statusIcon(update.status, true);
     }
-    if (update.detail !== undefined) {
-      let d = el.querySelector('.ss-detail');
-      if (!d) { d = document.createElement('span'); d.className = 'ss-detail'; el.querySelector('.ss-label').appendChild(d); }
-      d.textContent = update.detail;
+    if (update.label !== undefined) data.label = update.label;
+    if (update.detail !== undefined) data.detail = update.detail;
+    if (update.label !== undefined || update.detail !== undefined) {
+      renderSubStepLabel(el.querySelector('.ss-label'), data);
     }
   }
 
   function handleStreamToken(data) {
     const t = tasks.get(data.taskId);
     if (!t) return;
-    const ssEl = t.subSteps.get(data.subStepId);
-    if (!ssEl) return;
-    let stream = ssEl.querySelector('.ss-stream');
-    if (!stream) { stream = document.createElement('span'); stream.className = 'ss-stream'; ssEl.querySelector('.ss-label').appendChild(stream); }
-    stream.textContent += data.token;
-    if (stream.textContent.length > 200) stream.textContent = '…' + stream.textContent.slice(-180);
+    const entry = t.subSteps.get(data.subStepId);
+    if (!entry) return;
+    entry.data.stream += data.token;
+    if (entry.data.stream.length > 200) entry.data.stream = '…' + entry.data.stream.slice(-180);
+    let stream = entry.el.querySelector('.ss-stream');
+    if (!stream) { stream = document.createElement('span'); stream.className = 'ss-stream'; entry.el.querySelector('.ss-label').appendChild(stream); }
+    stream.textContent = entry.data.stream;
     scrollToBottom();
   }
 
@@ -876,6 +885,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   // ═════════════════════════════════════════════
   //  Message handler
   // ═════════════════════════════════════════════
+  let legacyIdSeq = 0;
   window.addEventListener('message', (event) => {
     const msg = event.data;
     switch (msg.type) {
@@ -896,8 +906,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
           tasks.clear();
           agentLoop.classList.add('visible');
           if (data.agentSteps && data.agentSteps.length > 0) {
+            let hIdx = 0;
             for (const step of data.agentSteps) {
-              const id = 'h-' + step.label.replace(/[^a-zA-Z0-9]/g, '_');
+              const id = 'h-' + step.label.replace(/[^a-zA-Z0-9]/g, '_') + '-' + (hIdx++);
               handleAddTask({ id, label: step.label, status: step.status === 'pending' ? 'done' : step.status, detail: step.detail, collapsible: true });
               const t = tasks.get(id);
               if (t) t.el.classList.add('collapsed');
@@ -1018,7 +1029,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 
       case 'addAgentStep': {
         const s = msg.payload;
-        const id = 'legacy-' + s.label.replace(/[^a-zA-Z0-9]/g, '_');
+        const id = 'legacy-' + s.label.replace(/[^a-zA-Z0-9]/g, '_') + '-' + (legacyIdSeq++);
         handleAddTask({ id, label: s.label, status: s.status === 'pending' ? 'running' : s.status, detail: s.detail });
         updateProgressBar();
         break;
