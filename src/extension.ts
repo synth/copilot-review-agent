@@ -334,6 +334,10 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await getFixActions().fixInChat(finding);
+    commentManager.resolveFinding(findingId);
+    taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    updateStatusBar('findings');
+    persistFindings();
   });
 
   const fixInEditsCmd = vscode.commands.registerCommand('selfReview.fixInEdits', async (thread: vscode.CommentThread) => {
@@ -342,6 +346,10 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await getFixActions().fixInEdits(finding);
+    commentManager.resolveFinding(findingId);
+    taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    updateStatusBar('findings');
+    persistFindings();
   });
 
   // ============================================================
