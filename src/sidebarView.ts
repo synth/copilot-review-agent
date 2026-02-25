@@ -856,9 +856,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
           if (data.summary) {
             summaryEl.innerHTML =
               '<span class="sum-headline">Review Complete</span>' +
-              '<span class="count">' + data.summary.totalFindings + '</span> finding' + (data.summary.totalFindings !== 1 ? 's' : '') +
-              ' across <span class="count">' + data.summary.fileCount + '</span> file' + (data.summary.fileCount !== 1 ? 's' : '') +
-              ' — <span class="count">' + data.summary.openCount + '</span> open';
+              '<span class="count">' + esc(String(data.summary.totalFindings)) + '</span> finding' + (data.summary.totalFindings !== 1 ? 's' : '') +
+              ' across <span class="count">' + esc(String(data.summary.fileCount)) + '</span> file' + (data.summary.fileCount !== 1 ? 's' : '') +
+              ' — <span class="count">' + esc(String(data.summary.openCount)) + '</span> open';
             summaryEl.classList.add('visible');
           }
           postActions.style.display = 'flex';
@@ -982,9 +982,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
         const { openCount, fileCount, totalFindings } = msg.payload;
         summaryEl.innerHTML =
           '<span class="sum-headline">Review Complete</span>' +
-          '<span class="count">' + totalFindings + '</span> finding' + (totalFindings !== 1 ? 's' : '') +
-          ' across <span class="count">' + fileCount + '</span> file' + (fileCount !== 1 ? 's' : '') +
-          ' — <span class="count">' + openCount + '</span> open';
+          '<span class="count">' + esc(String(totalFindings)) + '</span> finding' + (totalFindings !== 1 ? 's' : '') +
+          ' across <span class="count">' + esc(String(fileCount)) + '</span> file' + (fileCount !== 1 ? 's' : '') +
+          ' — <span class="count">' + esc(String(openCount)) + '</span> open';
         summaryEl.classList.add('visible');
         break;
       }
