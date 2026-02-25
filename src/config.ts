@@ -15,6 +15,12 @@ const DEFAULT_CONFIG: SelfReviewConfig = {
   maxFindings: 50,
 };
 
+const validSeverities: Severity[] = ['low', 'medium', 'high'];
+
+function isValidSeverity(s: unknown): s is Severity {
+  return typeof s === 'string' && validSeverities.includes(s as Severity);
+}
+
 /**
  * Loads the merged configuration from VS Code settings and .self-review.yml.
  * VS Code settings take precedence for baseBranch, targetBranch, severityThreshold.
@@ -29,12 +35,13 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
   // Merge: instructions file content gets appended to any yaml custom_instructions
   const yamlInstructions = fileConfig.customInstructions || '';
   const combinedInstructions = [yamlInstructions, instructionsFile].filter(Boolean).join('\n\n');
+  const rawSev = vsConfig.get<string>('severityThreshold');
 
   return {
-    baseBranch: vsConfig.get<string>('baseBranch') || fileConfig.baseBranch || DEFAULT_CONFIG.baseBranch,
+    baseBranch: vsConfig.get<string>('baseBranch') ?? fileConfig.baseBranch ?? DEFAULT_CONFIG.baseBranch,
     targetBranch: vsConfig.get<string>('targetBranch') ?? fileConfig.targetBranch ?? DEFAULT_CONFIG.targetBranch,
     includeUncommitted: vsConfig.get<boolean>('includeUncommitted') ?? fileConfig.includeUncommitted ?? DEFAULT_CONFIG.includeUncommitted,
-    severityThreshold: (vsConfig.get<string>('severityThreshold') as Severity) || fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold,
+    severityThreshold: isValidSeverity(rawSev) ? rawSev : (fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold),
     excludePaths: fileConfig.excludePaths.length > 0 ? fileConfig.excludePaths : (vsConfig.get<string[]>('excludePaths') || DEFAULT_CONFIG.excludePaths),
     maxFilesPerChunk: vsConfig.get<number>('maxFilesPerChunk') || fileConfig.maxFilesPerChunk || DEFAULT_CONFIG.maxFilesPerChunk,
     categories: fileConfig.categories.length > 0 ? fileConfig.categories : DEFAULT_CONFIG.categories,
@@ -164,14 +171,20 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
       continue;
     }
 
-    const colonIdx = trimmed.indexOf(':');
-    if (colonIdx === -1) {
+    // Only parse top-level mapping entries; ignore indented lines here.
+    if (/^\s/.test(line)) {
       i++;
       continue;
     }
 
-    const key = trimmed.slice(0, colonIdx).trim();
-    let value = trimmed.slice(colonIdx + 1).trim();
+    const keyValueMatch = line.match(/^([A-Za-z0-9_]+)\s*:\s*(.*)$/);
+    if (!keyValueMatch) {
+      i++;
+      continue;
+    }
+
+    const key = keyValueMatch[1];
+    let value = keyValueMatch[2].trim();
 
     // Multiline string (|)
     if (value === '|') {
