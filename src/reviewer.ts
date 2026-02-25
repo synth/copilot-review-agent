@@ -125,9 +125,8 @@ If there are no findings, respond with: []`;
     const chunkContext = buildChunkContext(chunk);
 
     const messages = [
-      vscode.LanguageModelChatMessage.Assistant(systemPrompt),
       vscode.LanguageModelChatMessage.User(
-        `Review the following code changes:\n\n${chunkContext}`
+        `${systemPrompt}\n\nReview the following code changes:\n\n${chunkContext}`
       ),
     ];
 
