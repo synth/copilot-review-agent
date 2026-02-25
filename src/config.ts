@@ -33,15 +33,29 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
   // Merge: instructions file content gets appended to any yaml custom_instructions
   const yamlInstructions = fileConfig.customInstructions || '';
   const combinedInstructions = [yamlInstructions, instructionsFile].filter(Boolean).join('\n\n');
-  const rawSev = vsConfig.get<string>('severityThreshold');
+
+  // Use inspect() to distinguish user-set values from package.json defaults.
+  // vsConfig.get() returns the default even when the user hasn't configured anything,
+  // so with `??` the YAML file values would never take effect.
+  const userValue = <T>(key: string): T | undefined => {
+    const i = vsConfig.inspect<T>(key);
+    return i?.workspaceFolderValue ?? i?.workspaceValue ?? i?.globalValue;
+  };
+
+  const userBaseBranch = userValue<string>('baseBranch');
+  const userTargetBranch = userValue<string>('targetBranch');
+  const userIncludeUncommitted = userValue<boolean>('includeUncommitted');
+  const userSeverity = userValue<string>('severityThreshold');
+  const userExcludePaths = userValue<string[]>('excludePaths');
+  const userMaxFilesPerChunk = userValue<number>('maxFilesPerChunk');
 
   return {
-    baseBranch: vsConfig.get<string>('baseBranch') ?? fileConfig.baseBranch ?? DEFAULT_CONFIG.baseBranch,
-    targetBranch: vsConfig.get<string>('targetBranch') ?? fileConfig.targetBranch ?? DEFAULT_CONFIG.targetBranch,
-    includeUncommitted: vsConfig.get<boolean>('includeUncommitted') ?? fileConfig.includeUncommitted ?? DEFAULT_CONFIG.includeUncommitted,
-    severityThreshold: isValidSeverity(rawSev) ? rawSev : (fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold),
-    excludePaths: fileConfig.excludePaths.length > 0 ? fileConfig.excludePaths : (vsConfig.get<string[]>('excludePaths') || DEFAULT_CONFIG.excludePaths),
-    maxFilesPerChunk: vsConfig.get<number>('maxFilesPerChunk') || fileConfig.maxFilesPerChunk || DEFAULT_CONFIG.maxFilesPerChunk,
+    baseBranch: userBaseBranch ?? fileConfig.baseBranch ?? DEFAULT_CONFIG.baseBranch,
+    targetBranch: userTargetBranch ?? fileConfig.targetBranch ?? DEFAULT_CONFIG.targetBranch,
+    includeUncommitted: userIncludeUncommitted ?? fileConfig.includeUncommitted ?? DEFAULT_CONFIG.includeUncommitted,
+    severityThreshold: isValidSeverity(userSeverity) ? userSeverity : (fileConfig.severityThreshold || DEFAULT_CONFIG.severityThreshold),
+    excludePaths: fileConfig.excludePaths.length > 0 ? fileConfig.excludePaths : (userExcludePaths ?? DEFAULT_CONFIG.excludePaths),
+    maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
     categories: fileConfig.categories.length > 0 ? fileConfig.categories : DEFAULT_CONFIG.categories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings || DEFAULT_CONFIG.maxFindings,
@@ -184,7 +198,7 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
       continue;
     }
 
-    const keyValueMatch = line.match(/^([A-Za-z0-9_]+)\s*:\s*(.*)$/);
+    const keyValueMatch = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
     if (!keyValueMatch) {
       i++;
       continue;
