@@ -756,10 +756,24 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   //  Agent loop — task management
   // ═════════════════════════════════════════════
   function statusIcon(status, small) {
-    if (status === 'running') return small ? '<span class="spinner-sm"></span>' : '<span class="spinner"></span>';
-    if (status === 'done') return '<span style="color:var(--vscode-testing-iconPassed,#388a34)">✓</span>';
-    if (status === 'error') return '<span style="color:var(--vscode-errorForeground,#f44747)">✗</span>';
-    return '○';
+    if (status === 'running') {
+      const s = document.createElement('span');
+      s.className = small ? 'spinner-sm' : 'spinner';
+      return s;
+    }
+    if (status === 'done') {
+      const s = document.createElement('span');
+      s.style.color = 'var(--vscode-testing-iconPassed,#388a34)';
+      s.textContent = '✓';
+      return s;
+    }
+    if (status === 'error') {
+      const s = document.createElement('span');
+      s.style.color = 'var(--vscode-errorForeground,#f44747)';
+      s.textContent = '✗';
+      return s;
+    }
+    return document.createTextNode('○');
   }
 
   function createTaskEl(task) {
@@ -768,11 +782,24 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     group.id = 'task-' + task.id;
     const header = document.createElement('div');
     header.className = 'task-header';
-    header.innerHTML =
-      '<span class="task-chevron">▼</span>' +
-      '<span class="task-icon">' + statusIcon(task.status, false) + '</span>' +
-      '<span class="task-label">' + esc(task.label) + '</span>' +
-      (task.detail ? '<span class="task-detail">' + esc(task.detail) + '</span>' : '');
+    const chevron = document.createElement('span');
+    chevron.className = 'task-chevron';
+    chevron.textContent = '▼';
+    const icon = document.createElement('span');
+    icon.className = 'task-icon';
+    icon.appendChild(statusIcon(task.status, false));
+    const label = document.createElement('span');
+    label.className = 'task-label';
+    label.textContent = task.label;
+    header.appendChild(chevron);
+    header.appendChild(icon);
+    header.appendChild(label);
+    if (task.detail) {
+      const detail = document.createElement('span');
+      detail.className = 'task-detail';
+      detail.textContent = task.detail;
+      header.appendChild(detail);
+    }
     header.addEventListener('click', () => group.classList.toggle('collapsed'));
     const body = document.createElement('div');
     body.className = 'task-body';
@@ -798,7 +825,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     if (update.status) {
       t.status = update.status;
       t.el.className = 'task-group status-' + update.status;
-      t.header.querySelector('.task-icon').innerHTML = statusIcon(update.status, false);
+      const iconEl = t.header.querySelector('.task-icon');
+      iconEl.textContent = '';
+      iconEl.appendChild(statusIcon(update.status, false));
       if ((update.status === 'done' || update.status === 'error') && update.collapsible !== false) {
         setTimeout(() => t.el.classList.add('collapsed'), 400);
       }
@@ -830,10 +859,14 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     el.className = 'sub-step';
     el.id = 'ss-' + step.taskId + '-' + step.id;
     const data = { label: step.label, detail: step.detail || '', status: step.status, stream: '' };
-    el.innerHTML =
-      '<span class="ss-icon">' + statusIcon(step.status, true) + '</span>' +
-      '<span class="ss-label"></span>';
-    renderSubStepLabel(el.querySelector('.ss-label'), data);
+    const ssIcon = document.createElement('span');
+    ssIcon.className = 'ss-icon';
+    ssIcon.appendChild(statusIcon(step.status, true));
+    const ssLabel = document.createElement('span');
+    ssLabel.className = 'ss-label';
+    el.appendChild(ssIcon);
+    el.appendChild(ssLabel);
+    renderSubStepLabel(ssLabel, data);
     t.subStepsEl.appendChild(el);
     t.subSteps.set(step.id, { el, data });
     scrollToBottom();
@@ -847,7 +880,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     const { el, data } = entry;
     if (update.status) {
       data.status = update.status;
-      el.querySelector('.ss-icon').innerHTML = statusIcon(update.status, true);
+      const ssIconEl = el.querySelector('.ss-icon');
+      ssIconEl.textContent = '';
+      ssIconEl.appendChild(statusIcon(update.status, true));
     }
     if (update.label !== undefined) data.label = update.label;
     if (update.detail !== undefined) data.detail = update.detail;
