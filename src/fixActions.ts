@@ -28,12 +28,13 @@ export class FixActions {
     const doc = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(doc);
 
-    // Select the relevant lines
-    const startLine = Math.max(0, finding.startLine - 1);
-    const endLine = Math.max(startLine, finding.endLine - 1);
+    // Select the relevant lines (clamp to valid document range)
+    const lines = doc.lineCount;
+    const startLine = Math.max(0, Math.min(lines - 1, finding.startLine - 1));
+    const endLine = Math.max(startLine, Math.min(lines - 1, finding.endLine - 1));
     editor.selection = new vscode.Selection(
       new vscode.Position(startLine, 0),
-      new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
+      new vscode.Position(endLine, doc.lineAt(endLine).text.length)
     );
 
     // Build the prompt for inline chat
@@ -77,11 +78,11 @@ export class FixActions {
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc);
 
-      const startLine = Math.max(0, finding.startLine - 1);
-      const endLine = Math.max(startLine, finding.endLine - 1);
+      const startLine = Math.max(0, Math.min(doc.lineCount - 1, finding.startLine - 1));
+      const endLine = Math.max(startLine, Math.min(doc.lineCount - 1, finding.endLine - 1));
       editor.selection = new vscode.Selection(
         new vscode.Position(startLine, 0),
-        new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
+        new vscode.Position(endLine, doc.lineAt(endLine).text.length)
       );
 
       try {
