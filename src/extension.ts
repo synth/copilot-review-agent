@@ -61,9 +61,13 @@ export function activate(context: vscode.ExtensionContext) {
     return folders[0];
   }
 
-  // Helper: get FixActions
+  // Helper: get FixActions (lazily created, reused across invocations)
+  let _fixActions: FixActions | undefined;
   function getFixActions(): FixActions {
-    return new FixActions(reviewEngine, getWorkspaceFolder());
+    if (!_fixActions) {
+      _fixActions = new FixActions(reviewEngine, getWorkspaceFolder());
+    }
+    return _fixActions;
   }
 
   // Helper: resolve a finding ID from various command sources
@@ -347,8 +351,7 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await getFixActions().fixInChat(finding);
-    commentManager.resolveFinding(findingId);
-    taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    taskListProvider.updateFinding(findingId, { status: 'in-progress' });
     updateStatusBar('findings');
     persistFindings();
   });
@@ -359,8 +362,7 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
     await getFixActions().fixInEdits(finding);
-    commentManager.resolveFinding(findingId);
-    taskListProvider.updateFinding(findingId, { status: 'fixed' });
+    taskListProvider.updateFinding(findingId, { status: 'in-progress' });
     updateStatusBar('findings');
     persistFindings();
   });
@@ -423,7 +425,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // ============================================================
-  function setupSidebarMessageHandler(): void {
+  function setupSidebarMessageHandler(): vscode.Disposable[] {
     let messageListenerDisposable: vscode.Disposable | undefined;
 
     function registerHandler(webviewView: vscode.WebviewView): void {
@@ -569,11 +571,21 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 const engine = new GitDiffEngine(wsFolder);
+                const targetRef = session.targetBranch || 'HEAD';
+                let mergeBase: string;
+                try {
+                  mergeBase = engine.getMergeBase(session.baseBranch, targetRef);
+                } catch {
+                  vscode.window.showErrorMessage(
+                    `Self Review: Cannot compute merge base between "${session.baseBranch}" and "${targetRef}". The branches may no longer exist or have diverged.`
+                  );
+                  break;
+                }
                 currentSelection = {
                   baseBranch: session.baseBranch,
                   targetBranch: session.targetBranch,
                   includeUncommitted: !session.targetBranch,
-                  mergeBase: engine.getMergeBase(session.baseBranch, session.targetBranch || 'HEAD'),
+                  mergeBase,
                 };
 
                 updateStatusBar('findings');
@@ -619,7 +631,13 @@ export function activate(context: vscode.ExtensionContext) {
       registerHandler(sidebarProvider.view);
     }
     // Also listen for future resolutions (e.g. view hidden then re-shown)
-    sidebarProvider.onDidResolveView(registerHandler);
+    const resolveViewDisposable = sidebarProvider.onDidResolveView(registerHandler);
+
+    // Return disposables so the caller can register them for cleanup
+    return [
+      resolveViewDisposable,
+      { dispose: () => messageListenerDisposable?.dispose() },
+    ];
   }
 
   // Register backToHistory command for view/title menu
@@ -635,10 +653,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
   });
 
-  setupSidebarMessageHandler();
+  const sidebarHandlerDisposables = setupSidebarMessageHandler();
 
   // Register all disposables
   context.subscriptions.push(
+    ...sidebarHandlerDisposables,
     commentManager,
     treeView,
     statusBarItem,

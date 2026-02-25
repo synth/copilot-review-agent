@@ -24,7 +24,7 @@ export interface ReviewFinding {
   description: string;
   suggestedFix?: string;
   category: Category;
-  status: 'open' | 'skipped' | 'fixed';
+  status: 'open' | 'skipped' | 'fixed' | 'in-progress';
 }
 
 /** A parsed diff hunk */
