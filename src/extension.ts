@@ -110,6 +110,13 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      // Validate target branch exists (only when a non-empty string is provided)
+      if (targetBranch && !engine.refExists(targetBranch)) {
+        vscode.window.showErrorMessage(`Self Review: Target branch "${targetBranch}" not found.`);
+        sidebarProvider.setReviewState('error');
+        return;
+      }
+
       // Compute merge base
       const targetRef = targetBranch || 'HEAD';
       let mergeBase: string;
@@ -219,7 +226,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   const exportCmd = vscode.commands.registerCommand('selfReview.exportMarkdown', async () => {
     const findings = taskListProvider.getFindings();
-    const base = currentSelection?.baseBranch || 'develop';
+    const base = currentSelection?.baseBranch ?? '';
     const target = currentSelection?.targetBranch || '';
     await exportFindings(findings, base, target);
   });
@@ -254,8 +261,9 @@ export function activate(context: vscode.ExtensionContext) {
       const engine = new GitDiffEngine(wsFolder);
       const baseBranch = await pickBaseBranch(engine, config.baseBranch);
       if (baseBranch && currentSelection) {
+        const newMergeBase = engine.getMergeBase(baseBranch, currentSelection.targetBranch || 'HEAD');
         currentSelection.baseBranch = baseBranch;
-        currentSelection.mergeBase = engine.getMergeBase(baseBranch, currentSelection.targetBranch || 'HEAD');
+        currentSelection.mergeBase = newMergeBase;
         updateStatusBar('idle');
       }
     } catch (err: unknown) {
@@ -273,9 +281,10 @@ export function activate(context: vscode.ExtensionContext) {
       const engine = new GitDiffEngine(wsFolder);
       const targetBranch = await pickTargetBranch(engine);
       if (targetBranch !== undefined && currentSelection) {
+        const newMergeBase = engine.getMergeBase(currentSelection.baseBranch, targetBranch || 'HEAD');
         currentSelection.targetBranch = targetBranch;
         currentSelection.includeUncommitted = !targetBranch;
-        currentSelection.mergeBase = engine.getMergeBase(currentSelection.baseBranch, targetBranch || 'HEAD');
+        currentSelection.mergeBase = newMergeBase;
         updateStatusBar('idle');
       }
     } catch (err: unknown) {
@@ -344,11 +353,13 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    await fixActions.fixInChat(finding, getWorkspaceFolder());
-    commentManager.resolveFinding(findingId);
-    taskListProvider.updateFinding(findingId, { status: 'fixed' });
-    updateStatusBar('findings');
-    persistFindings();
+    const success = await fixActions.fixInChat(finding, getWorkspaceFolder());
+    if (success) {
+      commentManager.resolveFinding(findingId);
+      taskListProvider.updateFinding(findingId, { status: 'fixed' });
+      updateStatusBar('findings');
+      persistFindings();
+    }
   });
 
   const fixInEditsCmd = vscode.commands.registerCommand('selfReview.fixInEdits', async (thread: vscode.CommentThread) => {
@@ -356,11 +367,13 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    await fixActions.fixInEdits(finding, getWorkspaceFolder());
-    commentManager.resolveFinding(findingId);
-    taskListProvider.updateFinding(findingId, { status: 'fixed' });
-    updateStatusBar('findings');
-    persistFindings();
+    const success = await fixActions.fixInEdits(finding, getWorkspaceFolder());
+    if (success) {
+      commentManager.resolveFinding(findingId);
+      taskListProvider.updateFinding(findingId, { status: 'fixed' });
+      updateStatusBar('findings');
+      persistFindings();
+    }
   });
 
   // ============================================================
@@ -408,6 +421,18 @@ export function activate(context: vscode.ExtensionContext) {
       updateStatusBar('findings');
       persistFindings();
     }
+  });
+
+  const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
+    if (!item.filePath) { return; }
+    const findings = taskListProvider.getFileFindings(item.filePath);
+    await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
+    for (const finding of findings) {
+      commentManager.resolveFinding(finding.id);
+      taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+    }
+    updateStatusBar('findings');
+    persistFindings();
   });
 
   // ============================================================
@@ -478,7 +503,7 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'setModel': {
-                if (typeof msg.payload !== 'string' && msg.payload !== undefined) {
+                if (msg.payload !== undefined && typeof msg.payload !== 'string') {
                   break;
                 }
                 const modelId = msg.payload as string | undefined;
@@ -686,6 +711,7 @@ export function activate(context: vscode.ExtensionContext) {
     goToFindingCmd,
     skipTreeItemCmd,
     fixTreeItemCmd,
+    fixAllInFileCmd,
     sortFindingsCmd,
     backToHistoryCmd,
   );
@@ -964,7 +990,7 @@ export function activate(context: vscode.ExtensionContext) {
       sidebar.updateTask({ id: postTaskId, status: 'done', detail: 'Done' });
 
       updateStatusBar('findings');
-      sidebar.setReviewState(wasCancelled ? 'done' : 'done');
+      sidebar.setReviewState('done');
 
       // Summary
       const openCount = deduped.filter(f => f.status === 'open').length;
@@ -1010,7 +1036,7 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
   const result: ReviewFinding[] = [];
 
   for (const f of findings) {
-    const key = `${f.file}:${f.startLine}:${f.title.toLowerCase().slice(0, 40)}`;
+    const key = `${f.file}:${f.startLine}:${f.title.toLowerCase()}`;
     if (seen.has(key)) { continue; }
     seen.add(key);
     result.push(f);
@@ -1020,5 +1046,7 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
 }
 
 export function deactivate() {
-  // Cleanup handled by disposables
+  // Cancel any in-flight AI request
+  activeTokenSource?.cancel();
+  activeTokenSource?.dispose();
 }

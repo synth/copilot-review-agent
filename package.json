@@ -101,6 +101,11 @@
         "icon": "$(wand)"
       },
       {
+        "command": "selfReview.fixAllInFile",
+        "title": "Fix All in File",
+        "icon": "$(wand)"
+      },
+      {
         "command": "selfReview.sortFindings",
         "title": "Sort Findings",
         "icon": "$(sort-precedence)"
@@ -185,6 +190,11 @@
           "command": "selfReview.fixTreeItem",
           "when": "view == selfReview.taskList && viewItem == finding",
           "group": "inline@3"
+        },
+        {
+          "command": "selfReview.fixAllInFile",
+          "when": "view == selfReview.taskList && viewItem == fileGroup",
+          "group": "inline@1"
         }
       ],
       "comments/commentThread/title": [

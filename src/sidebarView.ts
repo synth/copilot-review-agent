@@ -82,6 +82,7 @@ export interface AgentStep {
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'selfReview.controlPanel';
+  private static readonly MAX_PENDING = 500;
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _pendingMessages: WebviewMessage[] = [];
@@ -123,6 +124,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this._pendingMessages = [];
       }
     });
+    webviewView.onDidDispose(() => readyListener.dispose());
 
     this._onDidResolveView.fire(webviewView);
   }
@@ -133,6 +135,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     if (this._view && this._webviewReady) {
       this._view.webview.postMessage(message);
     } else {
+      if (this._pendingMessages.length >= SidebarViewProvider.MAX_PENDING) {
+        this._pendingMessages.shift(); // drop oldest
+      }
       this._pendingMessages.push(message);
     }
   }
@@ -228,8 +233,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<style nonce="${nonce}">
 /* ═══════════════════════════════════════════════
    Reset & base
    ═══════════════════════════════════════════════ */
@@ -665,7 +670,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       row.appendChild(stats);
 
       row.addEventListener('click', (e) => {
-        if (e.target.classList.contains('hi-delete')) return;
+        if (deleteBtn.contains(e.target)) return;
         vscode.postMessage({ type: 'openReview', payload: item.id });
       });
       deleteBtn.addEventListener('click', (e) => {
@@ -1118,7 +1123,10 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       localGroup.appendChild(opt);
     }
     select.appendChild(localGroup);
-    const uniqueRemotes = remotes.filter(r => !locals.includes(r) && r !== 'HEAD');
+    const uniqueRemotes = remotes.filter(r => {
+      const stripped = r.replace(/^origin\//, '');
+      return !locals.includes(stripped) && stripped !== 'HEAD';
+    });
     if (uniqueRemotes.length > 0) {
       const remoteGroup = document.createElement('optgroup');
       remoteGroup.label = 'Remote Branches';

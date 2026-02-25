@@ -56,8 +56,9 @@ export class FixActions {
 
   /**
    * Fix in Chat: Open Copilot Chat with the finding context pre-filled.
+   * Returns true if the chat was opened successfully, false otherwise.
    */
-  async fixInChat(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+  async fixInChat(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [
       `Fix this code review finding in #file:${finding.file} at line ${finding.startLine}:`,
       ``,
@@ -70,6 +71,7 @@ export class FixActions {
     try {
       // Open in agent mode so the chat can actually edit files (not just explain)
       await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'agent' });
+      return true;
     } catch {
       // Fallback: try inline chat
       const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
@@ -86,18 +88,21 @@ export class FixActions {
 
       try {
         await vscode.commands.executeCommand('inlineChat.start');
+        return true;
       } catch {
         vscode.window.showWarningMessage(
           'Self Review: Could not open Copilot Chat. Is GitHub Copilot installed?'
         );
+        return false;
       }
     }
   }
 
   /**
    * Fix in Copilot Edits: Open an edit session with the finding context.
+   * Returns true if the edit session was opened successfully, false otherwise.
    */
-  async fixInEdits(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+  async fixInEdits(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
     const query = [
       `Fix this issue in #file:${finding.file}`,
       ``,
@@ -110,12 +115,50 @@ export class FixActions {
     try {
       // Open in edit mode so Copilot Edits can apply changes directly
       await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'edit' });
+      return true;
     } catch {
       // Fallback: try opening the file and triggering inline chat
       vscode.window.showWarningMessage(
         'Self Review: Could not open Copilot Edits. Falling back to Chat.'
       );
-      await this.fixInChat(finding, workspaceFolder);
+      return await this.fixInChat(finding, workspaceFolder);
+    }
+  }
+
+  /**
+   * Fix All in File: Open a single Copilot Edits session with all open findings
+   * for the given file combined into one prompt.
+   */
+  async fixAllInFile(findings: ReviewFinding[], filePath: string, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+    if (findings.length === 0) {
+      vscode.window.showInformationMessage('No open findings remain for this file.');
+      return;
+    }
+
+    const findingsList = findings
+      .map((f, i) =>
+        [
+          `${i + 1}. **${f.severity.toUpperCase()}** (line ${f.startLine}): ${f.title}`,
+          `   ${f.description}`,
+          f.suggestedFix ? `   Suggested approach: ${f.suggestedFix}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      )
+      .join('\n\n');
+
+    const query = [
+      `Fix all of the following code review findings in #file:${filePath}:`,
+      ``,
+      findingsList,
+    ].join('\n');
+
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'agent' });
+    } catch {
+      vscode.window.showWarningMessage(
+        'Self Review: Could not open Copilot Chat. Is GitHub Copilot installed?'
+      );
     }
   }
 }

@@ -51,6 +51,10 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
     return this.findings.find(f => f.id === id);
   }
 
+  getFileFindings(filePath: string): ReviewFinding[] {
+    return this.findings.filter(f => f.file === filePath && f.status === 'open');
+  }
+
   clearAll(): void {
     this.findings = [];
     this.refresh();
@@ -157,6 +161,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       group.contextValue = 'fileGroup';
       group.description = `${resolvedCount}/${findings.length} resolved`;
       group.iconPath = new vscode.ThemeIcon('file');
+      group.filePath = file;
       group.children = findings.map(f => this.findingToTreeItem(f, group));
       groups.push(group);
     }
@@ -205,6 +210,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
         fileGroup.contextValue = 'fileGroup';
         fileGroup.description = `${fileResolvedCount}/${fileFindings.length} resolved`;
         fileGroup.iconPath = new vscode.ThemeIcon('file');
+        fileGroup.filePath = file;
         fileGroup.parent = sevGroup;
         fileGroup.children = fileFindings.map(f => this.findingToTreeItem(f, fileGroup));
         return fileGroup;
@@ -256,6 +262,7 @@ export class TaskListItem extends vscode.TreeItem {
   children?: TaskListItem[];
   parent?: TaskListItem;
   findingId?: string;
+  filePath?: string;
 
   constructor(
     label: string,
