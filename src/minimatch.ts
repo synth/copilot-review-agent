@@ -19,7 +19,7 @@ function globToRegex(pattern: string): RegExp {
       if (pattern[i + 1] === '*') {
         // ** matches any number of directories
         if (pattern[i + 2] === '/') {
-          regexStr += '(?:.+/)?';
+          regexStr += '(?:.*/)?';
           i += 3;
         } else {
           regexStr += '.*';
@@ -37,7 +37,7 @@ function globToRegex(pattern: string): RegExp {
       regexStr += '\\.';
       i++;
     } else {
-      regexStr += c;
+      regexStr += c.replace(/[{}()\[\]^$+|\\]/g, '\\$&');
       i++;
     }
   }
