@@ -260,8 +260,8 @@
     "keybindings": [
       {
         "command": "selfReview.reviewBranch",
-        "key": "ctrl+shift+r",
-        "mac": "cmd+shift+r"
+        "key": "ctrl+shift+alt+r",
+        "mac": "cmd+shift+alt+r"
       }
     ]
   },
