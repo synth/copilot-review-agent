@@ -3,6 +3,15 @@ import * as vscode from 'vscode';
 /** Severity levels for review findings */
 export type Severity = 'blocker' | 'high' | 'medium' | 'low' | 'nit';
 
+/** Shared emoji map for severity levels */
+export const SEVERITY_EMOJI: Record<Severity, string> = {
+  blocker: '🔴',
+  high: '🟠',
+  medium: '🟡',
+  low: '🔵',
+  nit: '⚪',
+};
+
 /** Categories for review findings */
 export type Category =
   | 'security'

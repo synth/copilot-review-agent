@@ -1,5 +1,6 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { ReviewFinding } from './types';
+import { ReviewFinding, SEVERITY_EMOJI } from './types';
 
 /**
  * Manages inline review comments in the editor using the VS Code Comment Controller API.
@@ -7,6 +8,8 @@ import { ReviewFinding } from './types';
 export class CommentManager {
   private controller: vscode.CommentController;
   private threads: Map<string, vscode.CommentThread> = new Map();
+  /** Reverse lookup: thread → finding ID, avoids repurposing contextValue */
+  private threadToFindingId: WeakMap<vscode.CommentThread, string> = new WeakMap();
 
   constructor() {
     this.controller = vscode.comments.createCommentController('self-review', 'Self Review');
@@ -45,9 +48,9 @@ export class CommentManager {
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     thread.canReply = false;
     thread.label = finding.title;
-    thread.contextValue = finding.id; // Used to look up the finding from comment actions
 
     this.threads.set(finding.id, thread);
+    this.threadToFindingId.set(thread, finding.id);
     return thread;
   }
 
@@ -60,23 +63,17 @@ export class CommentManager {
     md.supportHtml = false;
 
     // Severity badge
-    const severityEmoji: Record<string, string> = {
-      blocker: '🔴',
-      high: '🟠',
-      medium: '🟡',
-      low: '🔵',
-      nit: '⚪',
-    };
-    const emoji = severityEmoji[finding.severity] || '⚪';
+    const emoji = SEVERITY_EMOJI[finding.severity] ?? '⚪';
 
     md.appendMarkdown(`${emoji} **${finding.severity.toUpperCase()}** — ${finding.category}\n\n`);
     md.appendMarkdown(`### ${finding.title}\n\n`);
     md.appendMarkdown(`${finding.description}\n\n`);
 
     if (finding.suggestedFix) {
+      const lang = path.extname(finding.file).slice(1) || 'text';
       md.appendMarkdown(`---\n\n`);
       md.appendMarkdown(`💡 **Suggested Fix**\n\n`);
-      md.appendMarkdown(`\`\`\`\n${finding.suggestedFix}\n\`\`\`\n\n`);
+      md.appendMarkdown(`\`\`\`${lang}\n${finding.suggestedFix}\n\`\`\`\n\n`);
     }
 
     return md;
@@ -111,10 +108,10 @@ export class CommentManager {
   }
 
   /**
-   * Find the finding ID from a comment thread (using contextValue).
+   * Find the finding ID from a comment thread.
    */
   findingIdFromThread(thread: vscode.CommentThread): string | undefined {
-    return thread.contextValue || undefined;
+    return this.threadToFindingId.get(thread);
   }
 
   /**

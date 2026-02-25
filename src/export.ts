@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewFinding } from './types';
+import { ReviewFinding, SEVERITY_EMOJI } from './types';
 
 /**
  * Export review findings as a Markdown document.
@@ -58,16 +58,16 @@ function buildMarkdown(findings: ReviewFinding[], baseBranch: string, targetBran
 
     for (const f of fileFindings) {
       const statusIcon = f.status === 'open' ? '⬜' : f.status === 'fixed' ? '✅' : '⏭️';
-      const sevEmoji: Record<string, string> = {
-        blocker: '🔴', high: '🟠', medium: '🟡', low: '🔵', nit: '⚪',
-      };
-      const emoji = sevEmoji[f.severity] || '⚪';
+      const emoji = SEVERITY_EMOJI[f.severity] ?? '⚪';
 
       lines.push(`### ${statusIcon} ${emoji} ${f.title}`);
       lines.push('');
       lines.push(`**Severity:** ${f.severity.toUpperCase()} | **Category:** ${f.category} | **Lines:** ${f.startLine}-${f.endLine} | **Status:** ${f.status}`);
       lines.push('');
-      lines.push(f.description);
+      // Wrap in a blockquote so AI-generated text with leading #/--- etc. can't corrupt document structure
+      for (const line of f.description.split('\n')) {
+        lines.push(`> ${line}`);
+      }
       lines.push('');
 
       if (f.suggestedFix) {

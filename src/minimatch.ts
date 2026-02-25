@@ -14,6 +14,11 @@
 
 const braceWarned = new Set<string>();
 
+/** Clears the brace-warning state. Useful when re-running tests in the same process. */
+export function resetWarnings(): void {
+  braceWarned.clear();
+}
+
 export function minimatch(filePath: string, pattern: string): boolean {
   if (pattern.includes('{') && !braceWarned.has(pattern)) {
     braceWarned.add(pattern);
@@ -34,7 +39,7 @@ export function minimatch(filePath: string, pattern: string): boolean {
  * `*` and `?` are handled by the glob parser above, so they never
  * reach this helper during normal operation.
  */
-const REGEX_SPECIAL = /[-\\^$.*+?()[\]{}|]/g;
+const REGEX_SPECIAL = /[-\\^$.*+?()[\]{}|]/;
 
 function globToRegex(pattern: string): RegExp {
   let regexStr = '';

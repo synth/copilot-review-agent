@@ -225,7 +225,7 @@
       "properties": {
         "selfReview.baseBranch": {
           "type": "string",
-          "default": "develop",
+          "default": "main",
           "description": "Default base branch to diff against."
         },
         "selfReview.targetBranch": {
@@ -263,6 +263,8 @@
         "selfReview.maxFilesPerChunk": {
           "type": "number",
           "default": 5,
+          "minimum": 1,
+          "maximum": 50,
           "description": "Max files to include per AI review chunk."
         }
       }
