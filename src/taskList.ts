@@ -232,14 +232,9 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
       item.description = `⏳ ${item.description} (in-progress)`;
       item.iconPath = new vscode.ThemeIcon('sync');
     } else if (finding.status !== 'open') {
-      item.description = `✓ ${item.description}`;
-      item.iconPath = new vscode.ThemeIcon('pass');
-    }
-
-    // Strikethrough label + dimmed description for resolved findings
-    if (finding.status !== 'open' && finding.status !== 'in-progress') {
       item.label = strikeThrough(finding.title);
-      item.description = `${item.description} (${finding.status})`;
+      item.description = `✓ ${item.description} (${finding.status})`;
+      item.iconPath = new vscode.ThemeIcon('pass');
     }
 
     // Click navigates to the finding
