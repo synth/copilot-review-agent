@@ -88,8 +88,7 @@ export class CommentManager {
     const thread = this.threads.get(findingId);
     if (thread) {
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-      // The state property uses 0=Unresolved, 1=Resolved
-      (thread as any).state = 1; // CommentThreadState.Resolved
+      thread.state = vscode.CommentThreadState.Resolved;
     }
   }
 
