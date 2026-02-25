@@ -1,6 +1,4 @@
 import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { ReviewSession } from './types';
 
@@ -122,7 +120,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
       enableScripts: true,
       localResourceRoots: [this._extensionUri],
     };
-    webviewView.webview.html = this._getHtml();
+    webviewView.webview.html = this._getPlaceholderHtml();
+    this._loadHtmlAsync(webviewView);
 
     // Wait for the webview JS to signal readiness before flushing queued messages.
     // A timeout fallback ensures messages aren't queued forever if 'ready' is missed.
@@ -256,18 +255,42 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   // ────────────────────────────────────────────────
   // HTML
   // ────────────────────────────────────────────────
-  private _getHtml(): string {
-    // Note: HTML is read fresh on each call rather than cached. This ensures:
-    // 1. During development, changes to media/sidebar.html take effect without
-    //    restarting the extension host.
-    // 2. In production, if the extension is updated and the extension host persists,
-    //    we serve the new HTML rather than stale cached content.
-    // The file read is fast and infrequent (only when the sidebar is shown), so
-    // caching provides minimal perf benefit.
+  private _getPlaceholderHtml(): string {
     const nonce = getNonce();
-    const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'sidebar.html');
-    const html = fs.readFileSync(htmlPath, 'utf8');
-    return html.replace(/\{\{NONCE\}\}/g, nonce);
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Review</title>
+</head>
+<body>
+  <div id="loading" style="padding: 20px; text-align: center;">
+    <p>Loading...</p>
+  </div>
+  <script nonce="${nonce}"></script>
+</body>
+</html>`;
+  }
+
+  private async _loadHtmlAsync(webviewView: vscode.WebviewView): Promise<void> {
+    try {
+      // Use vscode.workspace.fs.readFile which handles virtual file systems correctly
+      // (e.g., SSH, WSL, Codespaces) and doesn't block the extension host main thread.
+      const htmlUri = vscode.Uri.joinPath(this._extensionUri, 'media', 'sidebar.html');
+      const htmlBytes = await vscode.workspace.fs.readFile(htmlUri);
+      const html = new TextDecoder().decode(htmlBytes);
+      const nonce = getNonce();
+      const htmlWithNonce = html.replace(/\{\{NONCE\}\}/g, nonce);
+      
+      // Only update if this webview is still active (hasn't been disposed)
+      if (this._view === webviewView) {
+        webviewView.webview.html = htmlWithNonce;
+      }
+    } catch (error) {
+      console.error('Failed to load sidebar HTML:', error);
+      // Keep the placeholder HTML if loading fails
+    }
   }
 }
 
