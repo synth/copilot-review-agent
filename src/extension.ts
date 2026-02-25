@@ -568,6 +568,7 @@ export function activate(context: vscode.ExtensionContext) {
                   commentManager.addFinding(finding, wsFolder);
                 }
 
+                const engine = new GitDiffEngine(wsFolder);
                 currentSelection = {
                   baseBranch: session.baseBranch,
                   targetBranch: session.targetBranch,
