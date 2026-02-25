@@ -56,8 +56,8 @@ export class CommentManager {
    */
   private buildCommentBody(finding: ReviewFinding): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
-    md.supportHtml = true;
+    md.isTrusted = { enabledCommands: [] };
+    md.supportHtml = false;
 
     // Severity badge
     const severityEmoji: Record<string, string> = {
@@ -74,9 +74,9 @@ export class CommentManager {
     md.appendMarkdown(`${finding.description}\n\n`);
 
     if (finding.suggestedFix) {
-      md.appendMarkdown(`<details><summary>💡 Suggested Fix</summary>\n\n`);
+      md.appendMarkdown(`---\n\n`);
+      md.appendMarkdown(`💡 **Suggested Fix**\n\n`);
       md.appendMarkdown(`\`\`\`\n${finding.suggestedFix}\n\`\`\`\n\n`);
-      md.appendMarkdown(`</details>\n`);
     }
 
     return md;
