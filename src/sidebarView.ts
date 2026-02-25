@@ -38,6 +38,7 @@ export interface ExtensionMessage {
     | 'setBaseBranch'
     | 'setTargetBranch'
     | 'setModel'
+    | 'ready'
     | 'loadHistory'
     | 'openReview'
     | 'deleteReview'
@@ -82,6 +83,7 @@ export interface AgentStep {
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'selfReview.controlPanel';
   private _view?: vscode.WebviewView;
+  private _webviewReady = false;
   private _pendingMessages: WebviewMessage[] = [];
 
   private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
@@ -93,6 +95,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   dispose(): void {
     this._onDidResolveView.dispose();
     this._view = undefined;
+    this._webviewReady = false;
     this._pendingMessages = [];
   }
 
@@ -108,11 +111,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     };
     webviewView.webview.html = this._getHtml();
 
-    // Flush any messages that were queued before the webview was resolved
-    for (const msg of this._pendingMessages) {
-      webviewView.webview.postMessage(msg);
-    }
-    this._pendingMessages = [];
+    // Wait for the webview JS to signal readiness before flushing queued messages
+    this._webviewReady = false;
+    const readyListener = webviewView.webview.onDidReceiveMessage((msg: ExtensionMessage) => {
+      if (msg.type === 'ready') {
+        this._webviewReady = true;
+        readyListener.dispose();
+        for (const pending of this._pendingMessages) {
+          webviewView.webview.postMessage(pending);
+        }
+        this._pendingMessages = [];
+      }
+    });
 
     this._onDidResolveView.fire(webviewView);
   }
@@ -120,7 +130,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   get view(): vscode.WebviewView | undefined { return this._view; }
 
   postMessage(message: WebviewMessage): void {
-    if (this._view) {
+    if (this._view && this._webviewReady) {
       this._view.webview.postMessage(message);
     } else {
       this._pendingMessages.push(message);
@@ -679,8 +689,6 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-
   /** Create an element with optional className, text content, and children. */
   function el(tag, opts) {
     const e = document.createElement(tag);
@@ -1146,7 +1154,8 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     if (grp.children.length > 0) select.appendChild(grp);
   }
 
-  // Boot
+  // Signal readiness to the extension host, then request history
+  vscode.postMessage({ type: 'ready' });
   vscode.postMessage({ type: 'loadHistory' });
 })();
 </script>
