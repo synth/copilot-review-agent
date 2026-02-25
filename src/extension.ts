@@ -727,7 +727,8 @@ export function activate(context: vscode.ExtensionContext) {
       : '';
 
     // Show/hide the Review Findings tree view based on state
-    vscode.commands.executeCommand('setContext', 'selfReview.hasReview', state !== 'idle');
+    // Keep it hidden during "reviewing" so the tab starts closed; only reveal when findings are ready.
+    vscode.commands.executeCommand('setContext', 'selfReview.hasReview', state === 'findings');
 
     switch (state) {
       case 'idle':
@@ -991,6 +992,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       updateStatusBar('findings');
       sidebar.setReviewState('done');
+
+      // Reveal the Review Findings tree view now that results are ready
+      vscode.commands.executeCommand('selfReview.taskList.focus');
 
       // Summary
       const openCount = deduped.filter(f => f.status === 'open').length;
