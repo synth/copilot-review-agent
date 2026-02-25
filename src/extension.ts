@@ -641,6 +641,7 @@ export function activate(context: vscode.ExtensionContext) {
     commentManager,
     treeView,
     statusBarItem,
+    sidebarProvider,
     sidebarRegistration,
     reviewBranchCmd,
     reviewFileCmd,

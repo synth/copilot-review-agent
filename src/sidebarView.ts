@@ -78,15 +78,20 @@ export interface AgentStep {
 // Provider
 // ────────────────────────────────────────────────
 
-export class SidebarViewProvider implements vscode.WebviewViewProvider {
+export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'selfReview.controlPanel';
   private _view?: vscode.WebviewView;
+  private _pendingMessages: WebviewMessage[] = [];
 
   private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
   /** Fires when the webview view is resolved and ready for messages. */
   public readonly onDidResolveView = this._onDidResolveView.event;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
+
+  dispose(): void {
+    this._onDidResolveView.dispose();
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -99,13 +104,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri],
     };
     webviewView.webview.html = this._getHtml();
+
+    // Flush any messages that were queued before the webview was resolved
+    for (const msg of this._pendingMessages) {
+      webviewView.webview.postMessage(msg);
+    }
+    this._pendingMessages = [];
+
     this._onDidResolveView.fire(webviewView);
   }
 
   get view(): vscode.WebviewView | undefined { return this._view; }
 
   postMessage(message: WebviewMessage): void {
-    this._view?.webview.postMessage(message);
+    if (this._view) {
+      this._view.webview.postMessage(message);
+    } else {
+      this._pendingMessages.push(message);
+    }
   }
 
   // ── Convenience helpers ──
