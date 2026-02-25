@@ -8,16 +8,15 @@ import { ReviewEngine } from './reviewer';
  */
 export class FixActions {
   constructor(
-    private reviewEngine: ReviewEngine,
-    private workspaceFolder: vscode.WorkspaceFolder
+    private reviewEngine: ReviewEngine
   ) {}
 
   /**
    * Fix Inline: Open inline chat with the finding context so Copilot generates
    * the fix directly in the editor, providing keep/undo controls.
    */
-  async fixInline(finding: ReviewFinding): Promise<boolean> {
-    const filePath = path.join(this.workspaceFolder.uri.fsPath, finding.file);
+  async fixInline(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
+    const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
     const uri = vscode.Uri.file(filePath);
     try {
       await vscode.workspace.fs.stat(uri);
@@ -58,7 +57,7 @@ export class FixActions {
   /**
    * Fix in Chat: Open Copilot Chat with the finding context pre-filled.
    */
-  async fixInChat(finding: ReviewFinding): Promise<void> {
+  async fixInChat(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
     const query = [
       `Fix this code review finding in #file:${finding.file} at line ${finding.startLine}:`,
       ``,
@@ -73,7 +72,7 @@ export class FixActions {
       await vscode.commands.executeCommand('workbench.action.chat.open', { query, mode: 'agent' });
     } catch {
       // Fallback: try inline chat
-      const filePath = path.join(this.workspaceFolder.uri.fsPath, finding.file);
+      const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
       const uri = vscode.Uri.file(filePath);
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc);
@@ -98,7 +97,7 @@ export class FixActions {
   /**
    * Fix in Copilot Edits: Open an edit session with the finding context.
    */
-  async fixInEdits(finding: ReviewFinding): Promise<void> {
+  async fixInEdits(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
     const query = [
       `Fix this issue in #file:${finding.file}`,
       ``,
@@ -116,7 +115,7 @@ export class FixActions {
       vscode.window.showWarningMessage(
         'Self Review: Could not open Copilot Edits. Falling back to Chat.'
       );
-      await this.fixInChat(finding);
+      await this.fixInChat(finding, workspaceFolder);
     }
   }
 }

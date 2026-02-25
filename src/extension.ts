@@ -61,14 +61,8 @@ export function activate(context: vscode.ExtensionContext) {
     return folders[0];
   }
 
-  // Helper: get FixActions (lazily created, reused across invocations)
-  let _fixActions: FixActions | undefined;
-  function getFixActions(): FixActions {
-    if (!_fixActions) {
-      _fixActions = new FixActions(reviewEngine, getWorkspaceFolder());
-    }
-    return _fixActions;
-  }
+  // Fix action handler (stateless – workspace folder is resolved per call)
+  const fixActions = new FixActions(reviewEngine);
 
   // Helper: resolve a finding ID from various command sources
   function resolveFindingId(arg: unknown): string | undefined {
@@ -336,7 +330,7 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
 
-    const success = await getFixActions().fixInline(finding);
+    const success = await fixActions.fixInline(finding, getWorkspaceFolder());
     if (success) {
       commentManager.resolveFinding(findingId);
       taskListProvider.updateFinding(findingId, { status: 'fixed' });
@@ -350,7 +344,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    await getFixActions().fixInChat(finding);
+    await fixActions.fixInChat(finding, getWorkspaceFolder());
     taskListProvider.updateFinding(findingId, { status: 'in-progress' });
     updateStatusBar('findings');
     persistFindings();
@@ -361,7 +355,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    await getFixActions().fixInEdits(finding);
+    await fixActions.fixInEdits(finding, getWorkspaceFolder());
     taskListProvider.updateFinding(findingId, { status: 'in-progress' });
     updateStatusBar('findings');
     persistFindings();
@@ -405,7 +399,7 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(item.findingId);
     if (!finding) { return; }
 
-    const success = await getFixActions().fixInline(finding);
+    const success = await fixActions.fixInline(finding, getWorkspaceFolder());
     if (success) {
       commentManager.resolveFinding(item.findingId);
       taskListProvider.updateFinding(item.findingId, { status: 'fixed' });
