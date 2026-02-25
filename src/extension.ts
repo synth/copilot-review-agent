@@ -20,6 +20,7 @@ let currentSelection: BranchSelection | undefined;
 let currentSessionId: string | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let activeTokenSource: vscode.CancellationTokenSource | undefined;
+let controlPanelHidden = false;
 
 export function activate(context: vscode.ExtensionContext) {
   // Core managers
@@ -219,6 +220,10 @@ export function activate(context: vscode.ExtensionContext) {
     currentSelection = undefined;
     updateStatusBar('idle');
     sidebarProvider.resetReview();
+    if (controlPanelHidden) {
+      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+      controlPanelHidden = false;
+    }
   });
 
   // ============================================================
@@ -621,6 +626,12 @@ export function activate(context: vscode.ExtensionContext) {
                 updateStatusBar('findings');
                 sidebarProvider.showReviewDetail(session);
                 vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
+                // Minimize Review Controls and focus findings for past review too
+                if (!controlPanelHidden) {
+                  vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+                  controlPanelHidden = true;
+                }
+                vscode.commands.executeCommand('selfReview.taskList.focus');
                 break;
               }
               case 'deleteReview': {
@@ -650,6 +661,10 @@ export function activate(context: vscode.ExtensionContext) {
                 sendHistory();
                 sidebarProvider.showHistoryList();
                 vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
+                if (controlPanelHidden) {
+                  vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+                  controlPanelHidden = false;
+                }
                 break;
               }
             }
@@ -684,6 +699,10 @@ export function activate(context: vscode.ExtensionContext) {
     sendHistory();
     sidebarProvider.showHistoryList();
     vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
+    if (controlPanelHidden) {
+      vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+      controlPanelHidden = false;
+    }
   });
 
   const sidebarHandlerDisposables = setupSidebarMessageHandler();
@@ -993,7 +1012,11 @@ export function activate(context: vscode.ExtensionContext) {
       updateStatusBar('findings');
       sidebar.setReviewState('done');
 
-      // Reveal the Review Findings tree view now that results are ready
+      // Minimize the Review Controls panel and focus the findings tree
+      if (!controlPanelHidden) {
+        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        controlPanelHidden = true;
+      }
       vscode.commands.executeCommand('selfReview.taskList.focus');
 
       // Summary
