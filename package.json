@@ -3,7 +3,11 @@
   "displayName": "Copilot Review Agent — AI Branch Review",
   "description": "Diff your branch against a base, get AI-powered review findings as inline comments with a task list sidebar.",
   "version": "0.1.0",
-  "publisher": "recognize",
+  "publisher": "synth",
+  "author": {
+    "name": "Peter Philips",
+    "email": "pete@p373.net"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
