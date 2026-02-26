@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { SelfReviewConfig, Severity, Category } from './types';
+import { CopilotReviewAgentConfig, Severity, Category } from './types';
 
-const DEFAULT_CONFIG: SelfReviewConfig = {
+const DEFAULT_CONFIG: CopilotReviewAgentConfig = {
   baseBranch: 'main',
   targetBranch: '',
   includeUncommitted: true,
@@ -35,17 +35,17 @@ function isValidCategory(c: unknown): c is Category {
 }
 
 /**
- * Loads the merged configuration from VS Code settings and .self-review.yml.
+ * Loads the merged configuration from VS Code settings and .copilot-review-agent.yml.
  *
  * Precedence order (highest to lowest) for all settings:
  *   1. VS Code user/workspace settings (only if explicitly set, not package.json defaults)
- *   2. .self-review.yml values (including explicit empty arrays like `exclude_paths: []`)
+ *   2. .copilot-review-agent.yml values (including explicit empty arrays like `exclude_paths: []`)
  *   3. Built-in defaults
  *
- * .self-review-instructions.md content is appended to any yaml custom_instructions.
+ * .copilot-review-agent-instructions.md content is appended to any yaml custom_instructions.
  */
-export async function loadConfig(): Promise<SelfReviewConfig> {
-  const vsConfig = vscode.workspace.getConfiguration('selfReview');
+export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
+  const vsConfig = vscode.workspace.getConfiguration('copilotReviewAgent');
   const fileConfig = await loadYamlConfig();
   const instructionsFile = await loadInstructionsFile();
 
@@ -70,7 +70,21 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
   const userContextLines = userValue<number>('contextLines');
 
   if (userSeverity !== undefined && !isValidSeverity(userSeverity)) {
-    vscode.window.showWarningMessage(`Self Review: Invalid severityThreshold "${userSeverity}". Using default.`);
+    vscode.window.showWarningMessage(`Copilot Review Agent: Invalid severityThreshold "${userSeverity}". Using default.`);
+  }
+
+  // Validate categories from YAML: an explicit empty array would produce a useless
+  // review prompt with no focus areas. Warn and fall back to defaults in that case.
+  let resolvedCategories: Category[];
+  if (fileConfig.categories === undefined) {
+    resolvedCategories = DEFAULT_CONFIG.categories;
+  } else if (fileConfig.categories.length === 0) {
+    void vscode.window.showWarningMessage(
+      'Copilot Review Agent: `categories` is set to an empty array in .copilot-review-agent.yml. Using default categories.'
+    );
+    resolvedCategories = DEFAULT_CONFIG.categories;
+  } else {
+    resolvedCategories = fileConfig.categories;
   }
 
   return {
@@ -81,14 +95,14 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
     excludePaths: userExcludePaths ?? fileConfig.excludePaths ?? DEFAULT_CONFIG.excludePaths,
     maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
     contextLines: userContextLines ?? fileConfig.contextLines ?? DEFAULT_CONFIG.contextLines,
-    categories: fileConfig.categories ?? DEFAULT_CONFIG.categories,
+    categories: resolvedCategories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings ?? DEFAULT_CONFIG.maxFindings,
   };
 }
 
 /** The conventional filename for custom review instructions */
-export const INSTRUCTIONS_FILENAME = '.self-review-instructions.md';
+export const INSTRUCTIONS_FILENAME = '.copilot-review-agent-instructions.md';
 
 /**
  * Check whether the instructions file exists and return its URI.
@@ -106,7 +120,7 @@ export async function getInstructionsFilePath(): Promise<vscode.Uri | undefined>
 }
 
 /**
- * Load the .self-review-instructions.md file contents, if it exists.
+ * Load the .copilot-review-agent-instructions.md file contents, if it exists.
  */
 async function loadInstructionsFile(): Promise<string> {
   const uri = await getInstructionsFilePath();
@@ -119,9 +133,9 @@ async function loadInstructionsFile(): Promise<string> {
   }
 }
 
-/** Generate a sample .self-review-instructions.md file */
+/** Generate a sample .copilot-review-agent-instructions.md file */
 export function generateSampleInstructions(): string {
-  return `# Self Review — Custom Instructions
+  return `# Copilot Review Agent — Custom Instructions
 
 These instructions are automatically included in every AI code review for this repository.
 Edit this file to customize how the AI reviews your code.
@@ -169,7 +183,7 @@ async function loadYamlConfig(): Promise<FileConfig> {
     return empty;
   }
 
-  const configUri = vscode.Uri.joinPath(workspaceFolder.uri, '.self-review.yml');
+  const configUri = vscode.Uri.joinPath(workspaceFolder.uri, '.copilot-review-agent.yml');
   let content: string;
   try {
     const raw = await vscode.workspace.fs.readFile(configUri);
@@ -189,7 +203,7 @@ async function loadYamlConfig(): Promise<FileConfig> {
 
     if (rawSeverityThreshold !== undefined && !isValidSeverity(rawSeverityThreshold)) {
       vscode.window.showWarningMessage(
-        `Self Review: Invalid severity_threshold "${String(rawSeverityThreshold)}" in .self-review.yml. Ignoring.`
+        `Copilot Review Agent: Invalid severity_threshold "${String(rawSeverityThreshold)}" in .copilot-review-agent.yml. Ignoring.`
       );
     }
 
@@ -210,7 +224,7 @@ async function loadYamlConfig(): Promise<FileConfig> {
       maxFindings: Number.isFinite(rawMaxFindings) ? rawMaxFindings as number : undefined,
     };
   } catch (err) {
-    vscode.window.showWarningMessage(`Self Review: Failed to parse .self-review.yml: ${err}`);
+    vscode.window.showWarningMessage(`Copilot Review Agent: Failed to parse .copilot-review-agent.yml: ${err}`);
     return empty;
   }
 }
@@ -241,7 +255,7 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
       if (!warnedIndentedTopLevel && /^\s+[A-Za-z0-9_-]+\s*:\s*.*$/.test(line)) {
         warnedIndentedTopLevel = true;
         vscode.window.showWarningMessage(
-          'Self Review: Ignoring indented top-level YAML keys in .self-review.yml. Remove leading spaces to apply those settings.'
+          'Copilot Review Agent: Ignoring indented top-level YAML keys in .copilot-review-agent.yml. Remove leading spaces to apply those settings.'
         );
       }
       i++;
@@ -344,9 +358,9 @@ function parseSimpleYaml(content: string): Record<string, unknown> {
   return result;
 }
 
-/** Generates a sample .self-review.yml config file */
+/** Generates a sample .copilot-review-agent.yml config file */
 export function generateSampleConfig(): string {
-  return `# Self Review Configuration
+  return `# Copilot Review Agent Configuration
 # See https://github.com/recognize/self-review-vscode for docs
 
 # Default base branch to compare against

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ReviewSession, ReviewFinding, ReviewAgentStep, ReviewSessionSummary } from './types';
 
-const STORAGE_KEY = 'selfReview.reviewHistory';
+const STORAGE_KEY = 'copilotReviewAgent.reviewHistory';
 const MAX_HISTORY = 50;
 
 /**

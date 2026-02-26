@@ -1,5 +1,5 @@
 
-import { DiffFile, DiffChunk, SelfReviewConfig } from './types';
+import { DiffFile, DiffChunk, CopilotReviewAgentConfig } from './types';
 
 /**
  * Priority ordering for file review (lower number = reviewed first).
@@ -39,7 +39,7 @@ function filePriority(filePath: string): number {
  * merged into a single annotated block to avoid printing duplicate lines and
  * inflating token counts.
  */
-export function buildFileContext(file: DiffFile, config: SelfReviewConfig): string {
+export function buildFileContext(file: DiffFile, config: CopilotReviewAgentConfig): string {
   const contextLines = config.contextLines;
   const parts: string[] = [];
   parts.push(`## File: ${file.path}${file.isNew ? ' (new)' : ''}${file.isDeleted ? ' (deleted)' : ''}`);
@@ -115,7 +115,7 @@ function estimateTokens(text: string): number {
  */
 export function chunkDiffFiles(
   files: DiffFile[],
-  config: SelfReviewConfig,
+  config: CopilotReviewAgentConfig,
   tokenBudget: number = 40_000
 ): DiffChunk[] {
   // Filter out files with no hunks (binary, no changes)
@@ -171,6 +171,6 @@ export function chunkDiffFiles(
 /**
  * Build the full context string for a chunk, ready to be sent to the AI.
  */
-export function buildChunkContext(chunk: DiffChunk, config: SelfReviewConfig): string {
+export function buildChunkContext(chunk: DiffChunk, config: CopilotReviewAgentConfig): string {
   return chunk.files.map(f => buildFileContext(f, config)).join('\n\n---\n\n');
 }

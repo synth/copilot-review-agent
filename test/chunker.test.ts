@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import * as mocha from 'mocha';
 import { buildFileContext } from '../src/chunker';
-import { DiffFile, SelfReviewConfig } from '../src/types';
+import { DiffFile, CopilotReviewAgentConfig } from '../src/types';
 
 /**
- * Minimal SelfReviewConfig for tests — only `contextLines` and
+ * Minimal CopilotReviewAgentConfig for tests — only `contextLines` and
  * `maxFilesPerChunk` are used by buildFileContext / chunkDiffFiles.
  */
-const config: SelfReviewConfig = {
+const config: CopilotReviewAgentConfig = {
   baseBranch: 'main',
   targetBranch: '',
   includeUncommitted: false,

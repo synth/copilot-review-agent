@@ -1,4 +1,4 @@
-# Self Review — AI Branch Review
+# Copilot Review Agent — AI Branch Review
 
 Diff your branch against a base, get AI-powered review findings as inline comments with a task list sidebar.
 
@@ -28,7 +28,7 @@ Use this when you want to test the fully packaged extension (e.g. in a window ou
    ```bash
    npm run package
    ```
-   This compiles the source and produces a file like `self-review-0.1.0.vsix` in the project root.
+   This compiles the source and produces a file like `copilot-review-agent-0.1.0.vsix` in the project root.
 2. In VS Code, press `Cmd+Shift+P` → **Extensions: Install from VSIX...**
 3. Select the generated `.vsix` file.
 4. Press `Cmd+Shift+P` → **Developer: Reload Window**

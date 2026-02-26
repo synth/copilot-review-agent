@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
   const reviewStore = new ReviewStore(context.workspaceState);
 
   // Register TreeView
-  const treeView = vscode.window.createTreeView('selfReview.taskList', {
+  const treeView = vscode.window.createTreeView('copilotReviewAgent.taskList', {
     treeDataProvider: taskListProvider,
     showCollapseAll: true,
   });
@@ -56,7 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Status bar
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  statusBarItem.command = 'selfReview.reviewBranch';
+  statusBarItem.command = 'copilotReviewAgent.reviewBranch';
   updateStatusBar('idle');
   statusBarItem.show();
 
@@ -132,9 +132,9 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Review Branch
   // ============================================================
-  const reviewBranchCmd = vscode.commands.registerCommand('selfReview.reviewBranch', async (args?: { baseBranch?: string; targetBranch?: string }) => {
+  const reviewBranchCmd = vscode.commands.registerCommand('copilotReviewAgent.reviewBranch', async (args?: { baseBranch?: string; targetBranch?: string }) => {
     if (reviewInProgress) {
-      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      vscode.window.showWarningMessage('Copilot Review Agent: A review is already in progress.');
       return;
     }
     try {
@@ -161,14 +161,14 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Validate base branch exists
       if (!engine.refExists(baseBranch)) {
-        vscode.window.showErrorMessage(`Self Review: Base branch "${baseBranch}" not found.`);
+        vscode.window.showErrorMessage(`Copilot Review Agent: Base branch "${baseBranch}" not found.`);
         sidebarProvider.setReviewState('error');
         return;
       }
 
       // Validate target branch exists (only when a non-empty string is provided)
       if (targetBranch && !engine.refExists(targetBranch)) {
-        vscode.window.showErrorMessage(`Self Review: Target branch "${targetBranch}" not found.`);
+        vscode.window.showErrorMessage(`Copilot Review Agent: Target branch "${targetBranch}" not found.`);
         sidebarProvider.setReviewState('error');
         return;
       }
@@ -180,7 +180,7 @@ export function activate(context: vscode.ExtensionContext) {
         mergeBase = engine.getMergeBase(baseBranch, targetRef);
       } catch {
         vscode.window.showErrorMessage(
-          `Self Review: Cannot compute merge base between "${baseBranch}" and "${targetRef}". Are the branches related?`
+          `Copilot Review Agent: Cannot compute merge base between "${baseBranch}" and "${targetRef}". Are the branches related?`
         );
         sidebarProvider.setReviewState('error');
         return;
@@ -196,7 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runReview(wsFolder, engine, config, currentSelection, commentManager, taskListProvider, reviewEngine, sidebarProvider);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
       sidebarProvider.setReviewState('error');
     }
   });
@@ -204,15 +204,15 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Review Current File
   // ============================================================
-  const reviewFileCmd = vscode.commands.registerCommand('selfReview.reviewFile', async () => {
+  const reviewFileCmd = vscode.commands.registerCommand('copilotReviewAgent.reviewFile', async () => {
     if (reviewInProgress) {
-      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      vscode.window.showWarningMessage('Copilot Review Agent: A review is already in progress.');
       return;
     }
     try {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('Self Review: No active file.');
+        vscode.window.showWarningMessage('Copilot Review Agent: No active file.');
         return;
       }
 
@@ -230,7 +230,7 @@ export function activate(context: vscode.ExtensionContext) {
           mergeBase = engine.getMergeBase(config.baseBranch, targetRef);
         } catch {
           vscode.window.showErrorMessage(
-            `Self Review: Cannot compute merge base between "${config.baseBranch}" and "${targetRef}". Are the branches related?`
+            `Copilot Review Agent: Cannot compute merge base between "${config.baseBranch}" and "${targetRef}". Are the branches related?`
           );
           return;
         }
@@ -245,20 +245,20 @@ export function activate(context: vscode.ExtensionContext) {
       await runReview(wsFolder, engine, config, selection, commentManager, taskListProvider, reviewEngine, sidebarProvider, [relativePath]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
   // ============================================================
   // COMMAND: Refresh Review (re-run with same branches)
   // ============================================================
-  const refreshCmd = vscode.commands.registerCommand('selfReview.refreshReview', async () => {
+  const refreshCmd = vscode.commands.registerCommand('copilotReviewAgent.refreshReview', async () => {
     if (reviewInProgress) {
-      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      vscode.window.showWarningMessage('Copilot Review Agent: A review is already in progress.');
       return;
     }
     if (!currentSelection) {
-      await vscode.commands.executeCommand('selfReview.reviewBranch');
+      await vscode.commands.executeCommand('copilotReviewAgent.reviewBranch');
       return;
     }
     try {
@@ -270,14 +270,14 @@ export function activate(context: vscode.ExtensionContext) {
       await runReview(wsFolder, engine, config, currentSelection, commentManager, taskListProvider, reviewEngine, sidebarProvider);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
   // ============================================================
   // COMMAND: Clear Review
   // ============================================================
-  const clearCmd = vscode.commands.registerCommand('selfReview.clearReview', async () => {
+  const clearCmd = vscode.commands.registerCommand('copilotReviewAgent.clearReview', async () => {
     commentManager.clearAll();
     taskListProvider.clearAll();
     currentSelection = undefined;
@@ -285,7 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
     sidebarProvider.resetReview();
     if (controlPanelHidden) {
       try {
-        await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        await vscode.commands.executeCommand('copilotReviewAgent.controlPanel.toggleVisibility');
         controlPanelHidden = false;
       } catch {
         // Panel state may have desynced; ignore error
@@ -297,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Export Markdown
   // ============================================================
-  const exportCmd = vscode.commands.registerCommand('selfReview.exportMarkdown', async () => {
+  const exportCmd = vscode.commands.registerCommand('copilotReviewAgent.exportMarkdown', async () => {
     const findings = taskListProvider.getFindings();
     const base = currentSelection?.baseBranch ?? '';
     const target = currentSelection?.targetBranch || '';
@@ -307,7 +307,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Sort Findings
   // ============================================================
-  const sortFindingsCmd = vscode.commands.registerCommand('selfReview.sortFindings', async () => {
+  const sortFindingsCmd = vscode.commands.registerCommand('copilotReviewAgent.sortFindings', async () => {
     const currentSort = taskListProvider.getSortMode();
     const currentGroup = taskListProvider.getGroupBy();
     const picked = await vscode.window.showQuickPick(
@@ -327,7 +327,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Select Base Branch
   // ============================================================
-  const selectBaseCmd = vscode.commands.registerCommand('selfReview.selectBaseBranch', async () => {
+  const selectBaseCmd = vscode.commands.registerCommand('copilotReviewAgent.selectBaseBranch', async () => {
     try {
       const wsFolder = getWorkspaceFolder();
       const config = await loadConfig();
@@ -341,14 +341,14 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
   // ============================================================
   // COMMAND: Select Target Branch
   // ============================================================
-  const selectTargetCmd = vscode.commands.registerCommand('selfReview.selectTargetBranch', async () => {
+  const selectTargetCmd = vscode.commands.registerCommand('copilotReviewAgent.selectTargetBranch', async () => {
     try {
       const wsFolder = getWorkspaceFolder();
       const engine = new GitDiffEngine(wsFolder);
@@ -362,20 +362,20 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
   // ============================================================
   // COMMAND: Init Config
   // ============================================================
-  const initConfigCmd = vscode.commands.registerCommand('selfReview.initConfig', async () => {
+  const initConfigCmd = vscode.commands.registerCommand('copilotReviewAgent.initConfig', async () => {
     try {
       const wsFolder = getWorkspaceFolder();
-      const configPath = path.join(wsFolder.uri.fsPath, '.self-review.yml');
+      const configPath = path.join(wsFolder.uri.fsPath, '.copilot-review-agent.yml');
       if (fs.existsSync(configPath)) {
         const overwrite = await vscode.window.showWarningMessage(
-          '.self-review.yml already exists. Overwrite?',
+          '.copilot-review-agent.yml already exists. Overwrite?',
           'Yes', 'No'
         );
         if (overwrite !== 'Yes') { return; }
@@ -385,7 +385,7 @@ export function activate(context: vscode.ExtensionContext) {
       await vscode.window.showTextDocument(doc);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
@@ -402,7 +402,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMENT THREAD ACTIONS: Skip, Fix Inline, Fix in Chat, Fix in Edits
   // ============================================================
-  const skipFindingCmd = vscode.commands.registerCommand('selfReview.skipFinding', (thread: vscode.CommentThread) => {
+  const skipFindingCmd = vscode.commands.registerCommand('copilotReviewAgent.skipFinding', (thread: vscode.CommentThread) => {
     const findingId = resolveFindingId(thread);
     if (findingId) {
       commentManager.resolveFinding(findingId);
@@ -412,7 +412,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  const fixInlineCmd = vscode.commands.registerCommand('selfReview.fixInline', async (thread: vscode.CommentThread) => {
+  const fixInlineCmd = vscode.commands.registerCommand('copilotReviewAgent.fixInline', async (thread: vscode.CommentThread) => {
     const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
@@ -427,11 +427,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
-  const fixInChatCmd = vscode.commands.registerCommand('selfReview.fixInChat', async (thread: vscode.CommentThread) => {
+  const fixInChatCmd = vscode.commands.registerCommand('copilotReviewAgent.fixInChat', async (thread: vscode.CommentThread) => {
     const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
@@ -446,11 +446,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
-  const fixInEditsCmd = vscode.commands.registerCommand('selfReview.fixInEdits', async (thread: vscode.CommentThread) => {
+  const fixInEditsCmd = vscode.commands.registerCommand('copilotReviewAgent.fixInEdits', async (thread: vscode.CommentThread) => {
     const findingId = resolveFindingId(thread);
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
@@ -465,14 +465,14 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
   // ============================================================
   // TREE VIEW ACTIONS: Go To, Skip, Fix
   // ============================================================
-  const goToFindingCmd = vscode.commands.registerCommand('selfReview.goToFinding', async (arg: unknown) => {
+  const goToFindingCmd = vscode.commands.registerCommand('copilotReviewAgent.goToFinding', async (arg: unknown) => {
     const findingId = resolveFindingId(arg);
     if (!findingId) { return; }
 
@@ -494,11 +494,11 @@ export function activate(context: vscode.ExtensionContext) {
       editor.selection = new vscode.Selection(range.start, range.start);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
-  const skipTreeItemCmd = vscode.commands.registerCommand('selfReview.skipTreeItem', (item: TaskListItem) => {
+  const skipTreeItemCmd = vscode.commands.registerCommand('copilotReviewAgent.skipTreeItem', (item: TaskListItem) => {
     if (item.findingId) {
       commentManager.resolveFinding(item.findingId);
       taskListProvider.updateFinding(item.findingId, { status: 'skipped' });
@@ -507,7 +507,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  const fixTreeItemCmd = vscode.commands.registerCommand('selfReview.fixTreeItem', async (item: TaskListItem) => {
+  const fixTreeItemCmd = vscode.commands.registerCommand('copilotReviewAgent.fixTreeItem', async (item: TaskListItem) => {
     if (!item.findingId) { return; }
     const finding = taskListProvider.getFinding(item.findingId);
     if (!finding) { return; }
@@ -521,11 +521,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
-  const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
+  const fixAllInFileCmd = vscode.commands.registerCommand('copilotReviewAgent.fixAllInFile', async (item: TaskListItem) => {
     if (!item.filePath) { return; }
     try {
       const findings = taskListProvider.getFileFindings(item.filePath, 'open');
@@ -542,7 +542,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
     }
   });
 
@@ -565,10 +565,10 @@ export function activate(context: vscode.ExtensionContext) {
     updateStatusBar('idle');
     sendHistory();
     sidebarProvider.showHistoryList();
-    vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
+    vscode.commands.executeCommand('setContext', 'copilotReviewAgent.inReviewDetail', false);
     if (controlPanelHidden) {
       try {
-        await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        await vscode.commands.executeCommand('copilotReviewAgent.controlPanel.toggleVisibility');
         controlPanelHidden = false;
       } catch {
         // Panel state may have desynced; ignore error
@@ -604,7 +604,7 @@ export function activate(context: vscode.ExtensionContext) {
                   sidebarProvider.setSelectedBranches(config.baseBranch, config.targetBranch);
                 } catch (err: unknown) {
                   const msg2 = err instanceof Error ? err.message : String(err);
-                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  vscode.window.showErrorMessage(`Copilot Review Agent: ${msg2}`);
                 }
                 break;
               }
@@ -633,7 +633,7 @@ export function activate(context: vscode.ExtensionContext) {
                     reviewEngine.setModel(payload.modelId);
                   }
                 }
-                await vscode.commands.executeCommand('selfReview.reviewBranch', {
+                await vscode.commands.executeCommand('copilotReviewAgent.reviewBranch', {
                   baseBranch: payload.baseBranch,
                   targetBranch: payload.targetBranch,
                 });
@@ -665,17 +665,17 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'clearReview': {
-                await vscode.commands.executeCommand('selfReview.clearReview');
+                await vscode.commands.executeCommand('copilotReviewAgent.clearReview');
                 break;
               }
               case 'exportMarkdown': {
-                await vscode.commands.executeCommand('selfReview.exportMarkdown');
+                await vscode.commands.executeCommand('copilotReviewAgent.exportMarkdown');
                 break;
               }
               case 'newReview': {
                 // Switch to new review detail screen and load branches
                 sidebarProvider.showNewReview();
-                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
+                vscode.commands.executeCommand('setContext', 'copilotReviewAgent.inReviewDetail', true);
                 try {
                   const wsFolder = getWorkspaceFolder();
                   const engine = new GitDiffEngine(wsFolder);
@@ -698,7 +698,7 @@ export function activate(context: vscode.ExtensionContext) {
                   sidebarProvider.setInstructionsStatus(!!instrPath);
                 } catch (err: unknown) {
                   const msg2 = err instanceof Error ? err.message : String(err);
-                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  vscode.window.showErrorMessage(`Copilot Review Agent: ${msg2}`);
                 }
                 break;
               }
@@ -709,11 +709,11 @@ export function activate(context: vscode.ExtensionContext) {
                     const doc = await vscode.workspace.openTextDocument(instrPath);
                     await vscode.window.showTextDocument(doc);
                   } else {
-                    vscode.window.showWarningMessage(`Self Review: Instructions file not found. Create one first.`);
+                    vscode.window.showWarningMessage(`Copilot Review Agent: Instructions file not found. Create one first.`);
                   }
                 } catch (err: unknown) {
                   const msg2 = err instanceof Error ? err.message : String(err);
-                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  vscode.window.showErrorMessage(`Copilot Review Agent: ${msg2}`);
                 }
                 break;
               }
@@ -729,7 +729,7 @@ export function activate(context: vscode.ExtensionContext) {
                   sidebarProvider.setInstructionsStatus(true);
                 } catch (err: unknown) {
                   const msg2 = err instanceof Error ? err.message : String(err);
-                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  vscode.window.showErrorMessage(`Copilot Review Agent: ${msg2}`);
                 }
                 break;
               }
@@ -740,7 +740,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const sessionId = msg.payload;
                 const session = reviewStore.get(sessionId);
                 if (!session) {
-                  vscode.window.showErrorMessage('Self Review: Review session not found.');
+                  vscode.window.showErrorMessage('Copilot Review Agent: Review session not found.');
                   break;
                 }
                 if (session.modelId) {
@@ -760,7 +760,7 @@ export function activate(context: vscode.ExtensionContext) {
                   wsFolder = getWorkspaceFolder();
                 } catch (err: unknown) {
                   const msg2 = err instanceof Error ? err.message : String(err);
-                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  vscode.window.showErrorMessage(`Copilot Review Agent: ${msg2}`);
                   break;
                 }
                 for (const finding of session.findings) {
@@ -774,7 +774,7 @@ export function activate(context: vscode.ExtensionContext) {
                   mergeBase = engine.getMergeBase(session.baseBranch, targetRef);
                 } catch {
                   vscode.window.showErrorMessage(
-                    `Self Review: Cannot compute merge base between "${session.baseBranch}" and "${targetRef}". The branches may no longer exist or have diverged.`
+                    `Copilot Review Agent: Cannot compute merge base between "${session.baseBranch}" and "${targetRef}". The branches may no longer exist or have diverged.`
                   );
                   break;
                 }
@@ -787,18 +787,18 @@ export function activate(context: vscode.ExtensionContext) {
 
                 updateStatusBar('findings');
                 sidebarProvider.showReviewDetail(session);
-                vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', true);
+                vscode.commands.executeCommand('setContext', 'copilotReviewAgent.inReviewDetail', true);
                 // Minimize Review Controls and focus findings for past review too
                 if (!controlPanelHidden) {
                   try {
-                    await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+                    await vscode.commands.executeCommand('copilotReviewAgent.controlPanel.toggleVisibility');
                     controlPanelHidden = true;
                   } catch {
                     // Panel state may have desynced; ignore error
                     controlPanelHidden = true;
                   }
                 }
-                vscode.commands.executeCommand('selfReview.taskList.focus');
+                vscode.commands.executeCommand('copilotReviewAgent.taskList.focus');
                 break;
               }
               case 'deleteReview': {
@@ -844,7 +844,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // Register backToHistory command for view/title menu
-  const backToHistoryCmd = vscode.commands.registerCommand('selfReview.backToHistory', () => {
+  const backToHistoryCmd = vscode.commands.registerCommand('copilotReviewAgent.backToHistory', () => {
     backToHistory();
   });
 
@@ -890,19 +890,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Show/hide the Review Findings tree view based on state
     // Keep it hidden during "reviewing" so the tab starts closed; only reveal when findings are ready.
-    vscode.commands.executeCommand('setContext', 'selfReview.hasReview', state === 'findings');
+    vscode.commands.executeCommand('setContext', 'copilotReviewAgent.hasReview', state === 'findings');
 
     switch (state) {
       case 'idle':
-        statusBarItem.text = branchInfo ? `$(git-compare) Self Review: ${branchInfo}` : '$(git-compare) Self Review';
-        statusBarItem.tooltip = 'Click to run Self Review';
+        statusBarItem.text = branchInfo ? `$(git-compare) Copilot Review Agent: ${branchInfo}` : '$(git-compare) Copilot Review Agent';
+        statusBarItem.tooltip = 'Click to run Copilot Review Agent';
         break;
       case 'reviewing':
-        statusBarItem.text = `$(loading~spin) Self Review: Analyzing...`;
+        statusBarItem.text = `$(loading~spin) Copilot Review Agent: Analyzing...`;
         statusBarItem.tooltip = 'Review in progress...';
         break;
       case 'findings':
-        statusBarItem.text = `$(checklist) Self Review: ${open} open ${branchInfo ? `(${branchInfo})` : ''}`;
+        statusBarItem.text = `$(checklist) Copilot Review Agent: ${open} open ${branchInfo ? `(${branchInfo})` : ''}`;
         statusBarItem.tooltip = `${findings.length} total findings, ${open} open`;
         break;
     }
@@ -914,7 +914,7 @@ export function activate(context: vscode.ExtensionContext) {
   async function runReview(
     wsFolder: vscode.WorkspaceFolder,
     engine: GitDiffEngine,
-    config: import('./types').SelfReviewConfig,
+    config: import('./types').CopilotReviewAgentConfig,
     selection: BranchSelection,
     comments: CommentManager,
     taskList: TaskListProvider,
@@ -989,7 +989,7 @@ export function activate(context: vscode.ExtensionContext) {
         sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done', detail: 'No changes' });
         sidebar.updateTask({ id: diffTaskId, status: 'done', detail: 'No changes found' });
         legacyStep('Computing diff', 'done', 'No changes found');
-        vscode.window.showInformationMessage('Self Review: No changes found between the branches.');
+        vscode.window.showInformationMessage('Copilot Review Agent: No changes found between the branches.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
         reviewInProgress = false;
@@ -1006,7 +1006,7 @@ export function activate(context: vscode.ExtensionContext) {
         sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: 'All files excluded' });
         sidebar.updateTask({ id: diffTaskId, status: 'done', detail: 'All files excluded' });
         legacyStep('Computing diff', 'done', 'All files excluded');
-        vscode.window.showInformationMessage('Self Review: All changed files are excluded.');
+        vscode.window.showInformationMessage('Copilot Review Agent: All changed files are excluded.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
         reviewInProgress = false;
@@ -1125,7 +1125,7 @@ export function activate(context: vscode.ExtensionContext) {
           sidebar.updateSubStep({ taskId: reviewTaskId, id: aiSubId, label: 'AI analysis failed', status: 'error', detail: msg });
           sidebar.updateTask({ id: reviewTaskId, status: 'error', detail: msg });
           legacyStep(chunkLabel, 'error', msg);
-          vscode.window.showWarningMessage(`Self Review: Chunk ${i + 1} failed: ${msg}`);
+          vscode.window.showWarningMessage(`Copilot Review Agent: Chunk ${i + 1} failed: ${msg}`);
         }
       }
 
@@ -1177,14 +1177,14 @@ export function activate(context: vscode.ExtensionContext) {
       // Minimize the Review Controls panel and focus the findings tree
       if (!controlPanelHidden) {
         try {
-          await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+          await vscode.commands.executeCommand('copilotReviewAgent.controlPanel.toggleVisibility');
           controlPanelHidden = true;
         } catch {
           // Panel state may have desynced; ignore error
           controlPanelHidden = true;
         }
       }
-      vscode.commands.executeCommand('selfReview.taskList.focus');
+      vscode.commands.executeCommand('copilotReviewAgent.taskList.focus');
 
       // Summary
       const openCount = deduped.filter(f => f.status === 'open').length;
@@ -1193,7 +1193,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (wasCancelled) {
         vscode.window.showWarningMessage(
-          `Self Review: Cancelled after processing some chunks. ${deduped.length} finding(s) from completed chunks have been preserved.`
+          `Copilot Review Agent: Cancelled after processing some chunks. ${deduped.length} finding(s) from completed chunks have been preserved.`
         );
       }
 
@@ -1215,7 +1215,7 @@ export function activate(context: vscode.ExtensionContext) {
       const errTaskId = nextTaskId();
       sidebar.addTask({ id: errTaskId, label: 'Error', status: 'error', detail: msg });
       legacyStep('Error', 'error', msg);
-      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+      vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
       updateStatusBar('idle');
       sidebar.setReviewState('error');
     } finally {

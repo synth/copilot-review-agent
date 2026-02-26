@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DiffChunk, ReviewFinding, SelfReviewConfig, Severity, Category, nextFindingId, severityRank } from './types';
+import { DiffChunk, ReviewFinding, CopilotReviewAgentConfig, Severity, Category, nextFindingId, severityRank } from './types';
 import { buildChunkContext } from './chunker';
 
 /**
@@ -98,7 +98,7 @@ export class ReviewEngine {
         err?.name === 'ModelNotFoundError'
       );
       if (!isStale || token.isCancellationRequested) { throw err; }
-      console.warn('Self Review: Model reference stale, retrying with fresh model', err?.code || err?.name);
+      console.warn('Copilot Review Agent: Model reference stale, retrying with fresh model', err?.code || err?.name);
       this.model = undefined;
       const freshModel = await this.ensureModel();
       return await freshModel.sendRequest(messages, options, token);
@@ -108,7 +108,7 @@ export class ReviewEngine {
   /**
    * Build the system prompt for the review.
    */
-  private buildSystemPrompt(config: SelfReviewConfig): string {
+  private buildSystemPrompt(config: CopilotReviewAgentConfig): string {
     const categories = config.categories.join(', ');
     const severity = config.severityThreshold;
 
@@ -163,7 +163,7 @@ If there are no findings, respond with: []`;
    */
   async reviewChunk(
     chunk: DiffChunk,
-    config: SelfReviewConfig,
+    config: CopilotReviewAgentConfig,
     token: vscode.CancellationToken,
     onToken?: (fragment: string) => void
   ): Promise<ReviewFinding[]> {
@@ -182,7 +182,7 @@ If there are no findings, respond with: []`;
     ];
 
     const response = await this.sendRequestWithRetry(messages, {
-      justification: 'Self Review: Analyzing branch diff for code issues',
+      justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
     }, token);
 
     // Collect the full streamed response, forwarding tokens to caller
@@ -201,7 +201,7 @@ If there are no findings, respond with: []`;
   /**
    * Parse the AI response into ReviewFinding objects.
    */
-  private parseFindings(responseText: string, config: SelfReviewConfig): ReviewFinding[] {
+  private parseFindings(responseText: string, config: CopilotReviewAgentConfig): ReviewFinding[] {
     // Strip markdown fences if the model wrapped the JSON
     let cleaned = responseText.trim();
     if (cleaned.startsWith('```json')) {
@@ -247,7 +247,7 @@ If there are no findings, respond with: []`;
         if (!Array.isArray(extracted)) { return []; }
         rawFindings = extracted;
       } catch (err) {
-        vscode.window.showWarningMessage(`Self Review: Failed to parse AI response: ${err}`);
+        vscode.window.showWarningMessage(`Copilot Review Agent: Failed to parse AI response: ${err}`);
         return [];
       }
     }
@@ -323,7 +323,7 @@ ${truncatedContent}
     ];
 
     const response = await this.sendRequestWithRetry(messages, {
-      justification: 'Self Review: Generating fix for review finding',
+      justification: 'Copilot Review Agent: Generating fix for review finding',
     }, token);
 
     let fixText = '';

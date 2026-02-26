@@ -76,8 +76,8 @@ export interface BranchSelection {
   mergeBase?: string;
 }
 
-/** Extension configuration merged from settings + .self-review.yml */
-export interface SelfReviewConfig {
+/** Extension configuration merged from settings + .copilot-review-agent.yml */
+export interface CopilotReviewAgentConfig {
   baseBranch: string;
   targetBranch: string;
   includeUncommitted: boolean;

@@ -278,7 +278,7 @@ export async function pickBaseBranch(engine: GitDiffEngine, defaultBranch: strin
 
   const picked = await vscode.window.showQuickPick(items, {
     placeHolder: `Select base branch (default: ${defaultBranch})`,
-    title: 'Self Review — Base Branch',
+    title: 'Copilot Review Agent — Base Branch',
     matchOnDescription: true,
   });
 
@@ -309,7 +309,7 @@ export async function pickTargetBranch(engine: GitDiffEngine): Promise<string | 
 
   const picked = await vscode.window.showQuickPick(items, {
     placeHolder: 'Select target to review',
-    title: 'Self Review — Target',
+    title: 'Copilot Review Agent — Target',
     matchOnDescription: true,
   });
 

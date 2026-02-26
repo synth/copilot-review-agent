@@ -63,7 +63,7 @@ export class FixActions {
       return true;
     } catch {
       vscode.window.showWarningMessage(
-        'Self Review: Could not open inline chat. Is GitHub Copilot installed?'
+        'Copilot Review Agent: Could not open inline chat. Is GitHub Copilot installed?'
       );
       return false;
     }
@@ -99,7 +99,7 @@ export class FixActions {
         return true;
       } catch {
         vscode.window.showWarningMessage(
-          'Self Review: Could not open Copilot Chat. Is GitHub Copilot installed?'
+          'Copilot Review Agent: Could not open Copilot Chat. Is GitHub Copilot installed?'
         );
         return false;
       }
@@ -127,7 +127,7 @@ export class FixActions {
     } catch {
       // Fallback: try opening the file and triggering inline chat
       vscode.window.showWarningMessage(
-        'Self Review: Could not open Copilot Edits. Falling back to Chat.'
+        'Copilot Review Agent: Could not open Copilot Edits. Falling back to Chat.'
       );
       return await this.fixInChat(finding, workspaceFolder);
     }
@@ -165,7 +165,7 @@ export class FixActions {
       return true;
     } catch {
       vscode.window.showWarningMessage(
-        'Self Review: Could not open Copilot Chat. Is GitHub Copilot installed?'
+        'Copilot Review Agent: Could not open Copilot Chat. Is GitHub Copilot installed?'
       );
       return false;
     }

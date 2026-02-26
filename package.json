@@ -1,10 +1,18 @@
 {
-  "name": "self-review",
-  "displayName": "Self Review — AI Branch Review",
+  "name": "copilot-review-agent",
+  "displayName": "Copilot Review Agent — AI Branch Review",
   "description": "Diff your branch against a base, get AI-powered review findings as inline comments with a task list sidebar.",
   "version": "0.1.0",
-  "publisher": "recognize",
+  "publisher": "synth",
+  "author": {
+    "name": "Peter Philips",
+    "email": "pete@p373.net"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/synth/copilot-review-agent"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -23,95 +31,95 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onView:selfReview.controlPanel",
-    "onView:selfReview.taskList"
+    "onView:copilotReviewAgent.controlPanel",
+    "onView:copilotReviewAgent.taskList"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "selfReview.reviewBranch",
-        "title": "Self Review: Review Branch",
+        "command": "copilotReviewAgent.reviewBranch",
+        "title": "Copilot Review Agent: Review Branch",
         "icon": "$(play)"
       },
       {
-        "command": "selfReview.reviewFile",
-        "title": "Self Review: Review Current File",
+        "command": "copilotReviewAgent.reviewFile",
+        "title": "Copilot Review Agent: Review Current File",
         "icon": "$(file-code)"
       },
       {
-        "command": "selfReview.clearReview",
-        "title": "Self Review: Clear All Findings",
+        "command": "copilotReviewAgent.clearReview",
+        "title": "Copilot Review Agent: Clear All Findings",
         "icon": "$(clear-all)"
       },
       {
-        "command": "selfReview.exportMarkdown",
-        "title": "Self Review: Export Findings as Markdown",
+        "command": "copilotReviewAgent.exportMarkdown",
+        "title": "Copilot Review Agent: Export Findings as Markdown",
         "icon": "$(markdown)"
       },
       {
-        "command": "selfReview.refreshReview",
-        "title": "Self Review: Re-run Review",
+        "command": "copilotReviewAgent.refreshReview",
+        "title": "Copilot Review Agent: Re-run Review",
         "icon": "$(refresh)"
       },
       {
-        "command": "selfReview.selectBaseBranch",
-        "title": "Self Review: Change Base Branch"
+        "command": "copilotReviewAgent.selectBaseBranch",
+        "title": "Copilot Review Agent: Change Base Branch"
       },
       {
-        "command": "selfReview.selectTargetBranch",
-        "title": "Self Review: Change Target Branch"
+        "command": "copilotReviewAgent.selectTargetBranch",
+        "title": "Copilot Review Agent: Change Target Branch"
       },
       {
-        "command": "selfReview.initConfig",
-        "title": "Self Review: Initialize Config File"
+        "command": "copilotReviewAgent.initConfig",
+        "title": "Copilot Review Agent: Initialize Config File"
       },
       {
-        "command": "selfReview.skipFinding",
+        "command": "copilotReviewAgent.skipFinding",
         "title": "Skip",
         "icon": "$(pass)"
       },
       {
-        "command": "selfReview.fixInline",
+        "command": "copilotReviewAgent.fixInline",
         "title": "Fix Inline",
         "icon": "$(wand)"
       },
       {
-        "command": "selfReview.fixInChat",
+        "command": "copilotReviewAgent.fixInChat",
         "title": "Fix in Chat",
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "selfReview.fixInEdits",
+        "command": "copilotReviewAgent.fixInEdits",
         "title": "Fix in Edits",
         "icon": "$(edit)"
       },
       {
-        "command": "selfReview.goToFinding",
+        "command": "copilotReviewAgent.goToFinding",
         "title": "Go to Finding",
         "icon": "$(go-to-file)"
       },
       {
-        "command": "selfReview.skipTreeItem",
+        "command": "copilotReviewAgent.skipTreeItem",
         "title": "Skip",
         "icon": "$(pass)"
       },
       {
-        "command": "selfReview.fixTreeItem",
+        "command": "copilotReviewAgent.fixTreeItem",
         "title": "Fix Inline",
         "icon": "$(wand)"
       },
       {
-        "command": "selfReview.fixAllInFile",
+        "command": "copilotReviewAgent.fixAllInFile",
         "title": "Fix All in File",
         "icon": "$(wand)"
       },
       {
-        "command": "selfReview.sortFindings",
+        "command": "copilotReviewAgent.sortFindings",
         "title": "Sort Findings",
         "icon": "$(sort-precedence)"
       },
       {
-        "command": "selfReview.backToHistory",
+        "command": "copilotReviewAgent.backToHistory",
         "title": "Back to History",
         "icon": "$(arrow-left)"
       }
@@ -119,136 +127,138 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "self-review",
-          "title": "Self Review",
+          "id": "copilot-review-agent",
+          "title": "Copilot Review Agent",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "self-review": [
+      "copilot-review-agent": [
         {
           "type": "webview",
-          "id": "selfReview.controlPanel",
+          "id": "copilotReviewAgent.controlPanel",
           "name": "Review Controls",
           "visibility": "visible"
         },
         {
-          "id": "selfReview.taskList",
+          "id": "copilotReviewAgent.taskList",
           "name": "Review Findings",
-          "when": "selfReview.hasReview",
+          "when": "copilotReviewAgent.hasReview",
           "visibility": "visible"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "selfReview.taskList",
+        "view": "copilotReviewAgent.taskList",
         "contents": "No review findings yet."
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "selfReview.backToHistory",
-          "when": "view == selfReview.taskList && selfReview.inReviewDetail",
+          "command": "copilotReviewAgent.backToHistory",
+          "when": "view == copilotReviewAgent.taskList && copilotReviewAgent.inReviewDetail",
           "group": "navigation@0"
         },
         {
-          "command": "selfReview.sortFindings",
-          "when": "view == selfReview.taskList",
+          "command": "copilotReviewAgent.sortFindings",
+          "when": "view == copilotReviewAgent.taskList",
           "group": "navigation@0"
         },
         {
-          "command": "selfReview.refreshReview",
-          "when": "view == selfReview.taskList",
+          "command": "copilotReviewAgent.refreshReview",
+          "when": "view == copilotReviewAgent.taskList",
           "group": "navigation@1"
         },
         {
-          "command": "selfReview.clearReview",
-          "when": "view == selfReview.taskList",
+          "command": "copilotReviewAgent.clearReview",
+          "when": "view == copilotReviewAgent.taskList",
           "group": "navigation@2"
         },
         {
-          "command": "selfReview.exportMarkdown",
-          "when": "view == selfReview.taskList",
+          "command": "copilotReviewAgent.exportMarkdown",
+          "when": "view == copilotReviewAgent.taskList",
           "group": "overflow"
         }
       ],
       "view/item/context": [
         {
-          "command": "selfReview.goToFinding",
-          "when": "view == selfReview.taskList && viewItem == finding",
+          "command": "copilotReviewAgent.goToFinding",
+          "when": "view == copilotReviewAgent.taskList && viewItem == finding",
           "group": "inline@1"
         },
         {
-          "command": "selfReview.skipTreeItem",
-          "when": "view == selfReview.taskList && viewItem == finding",
+          "command": "copilotReviewAgent.skipTreeItem",
+          "when": "view == copilotReviewAgent.taskList && viewItem == finding",
           "group": "inline@2"
         },
         {
-          "command": "selfReview.fixTreeItem",
-          "when": "view == selfReview.taskList && viewItem == finding",
+          "command": "copilotReviewAgent.fixTreeItem",
+          "when": "view == copilotReviewAgent.taskList && viewItem == finding",
           "group": "inline@3"
         },
         {
-          "command": "selfReview.fixAllInFile",
-          "when": "view == selfReview.taskList && viewItem == fileGroup",
+          "command": "copilotReviewAgent.fixAllInFile",
+          "when": "view == copilotReviewAgent.taskList && viewItem == fileGroup",
           "group": "inline@1"
         }
       ],
       "comments/commentThread/title": [
         {
-          "command": "selfReview.skipFinding",
-          "when": "commentController == self-review",
+          "command": "copilotReviewAgent.skipFinding",
+          "when": "commentController == copilot-review-agent",
           "group": "inline@1"
         },
         {
-          "command": "selfReview.fixInline",
-          "when": "commentController == self-review",
+          "command": "copilotReviewAgent.fixInline",
+          "when": "commentController == copilot-review-agent",
           "group": "inline@2"
         },
         {
-          "command": "selfReview.fixInChat",
-          "when": "commentController == self-review",
+          "command": "copilotReviewAgent.fixInChat",
+          "when": "commentController == copilot-review-agent",
           "group": "inline@3"
         },
         {
-          "command": "selfReview.fixInEdits",
-          "when": "commentController == self-review",
+          "command": "copilotReviewAgent.fixInEdits",
+          "when": "commentController == copilot-review-agent",
           "group": "inline@4"
         }
       ]
     },
     "configuration": {
-      "title": "Self Review",
+      "title": "Copilot Review Agent",
       "properties": {
-        "selfReview.baseBranch": {
+        "copilotReviewAgent.baseBranch": {
           "type": "string",
           "default": "main",
           "description": "Default base branch to diff against."
         },
-        "selfReview.targetBranch": {
+        "copilotReviewAgent.targetBranch": {
           "type": "string",
           "default": "",
           "description": "Default target branch. Empty means current HEAD + working tree."
         },
-        "selfReview.includeUncommitted": {
+        "copilotReviewAgent.includeUncommitted": {
           "type": "boolean",
           "default": true,
           "description": "Include uncommitted changes when target matches current checkout."
         },
-        "selfReview.severityThreshold": {
+        "copilotReviewAgent.severityThreshold": {
           "type": "string",
           "default": "low",
-          "enum": [
-            "low",
+            "enum": [
+            "blocker",
+            "high",
             "medium",
-            "high"
-          ],
+            "low",
+            "nit"
+            ],
           "description": "Minimum severity level to include in findings."
         },
-        "selfReview.excludePaths": {
+        "copilotReviewAgent.excludePaths": {
           "type": "array",
           "items": {
             "type": "string"
@@ -260,14 +270,14 @@
           ],
           "description": "Glob patterns of files to exclude from review."
         },
-        "selfReview.maxFilesPerChunk": {
+        "copilotReviewAgent.maxFilesPerChunk": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "maximum": 50,
           "description": "Max files to include per AI review chunk."
         },
-        "selfReview.contextLines": {
+        "copilotReviewAgent.contextLines": {
           "type": "number",
           "default": 10,
           "minimum": 0,
@@ -278,7 +288,7 @@
     },
     "keybindings": [
       {
-        "command": "selfReview.reviewBranch",
+        "command": "copilotReviewAgent.reviewBranch",
         "key": "ctrl+shift+alt+r",
         "mac": "cmd+shift+alt+r"
       }

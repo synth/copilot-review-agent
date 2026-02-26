@@ -31,13 +31,13 @@ export function minimatch(filePath: string, pattern: string): boolean {
     if (braceWarned.size < MAX_BRACE_WARNING_CACHE) {
       braceWarned.add(pattern);
       console.warn(
-        `[self-review] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
+        `[copilot-review-agent] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
         `Brace expansion is not supported — the pattern will be matched literally.`
       );
     } else if (!braceLimitWarned) {
       braceLimitWarned = true;
       console.warn(
-        `[self-review] Further brace-expansion warnings suppressed (more than ${MAX_BRACE_WARNING_CACHE} distinct patterns seen). ` +
+        `[copilot-review-agent] Further brace-expansion warnings suppressed (more than ${MAX_BRACE_WARNING_CACHE} distinct patterns seen). ` +
         `These patterns are still matched literally, not expanded.`
       );
     }
