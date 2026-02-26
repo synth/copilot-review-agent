@@ -81,7 +81,7 @@ export interface AgentStep {
 // ────────────────────────────────────────────────
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
-  public static readonly viewType = 'selfReview.controlPanel';
+  public static readonly viewType = 'copilotReviewAgent.controlPanel';
   private static readonly MAX_PENDING = 500;
   private static readonly READY_TIMEOUT_MS = 5000;
   private _view?: vscode.WebviewView;
@@ -360,7 +360,7 @@ function validateNonces(html: string): void {
   }
   if (missing.length > 0) {
     console.error(
-      '[self-review] sidebar.html contains <script>/<style> tags without a nonce attribute.\n' +
+      '[copilot-review-agent] sidebar.html contains <script>/<style> tags without a nonce attribute.\n' +
       'These will be silently blocked by the Content-Security-Policy. ' +
       'Add nonce="{{NONCE}}" to each:\n' +
       missing.map(t => `  ${t}`).join('\n')

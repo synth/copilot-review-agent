@@ -6,7 +6,7 @@ import { ReviewFinding, SEVERITY_EMOJI } from './types';
  */
 export async function exportFindings(findings: ReviewFinding[], baseBranch: string, targetBranch: string): Promise<void> {
   if (findings.length === 0) {
-    vscode.window.showInformationMessage('Self Review: No findings to export.');
+    vscode.window.showInformationMessage('Copilot Review Agent: No findings to export.');
     return;
   }
 
@@ -24,7 +24,7 @@ function buildMarkdown(findings: ReviewFinding[], baseBranch: string, targetBran
   const lines: string[] = [];
 
   const target = targetBranch || 'HEAD + working tree';
-  lines.push(`# Self Review — ${baseBranch}..${target}`);
+  lines.push(`# Copilot Review Agent — ${baseBranch}..${target}`);
   lines.push('');
   lines.push(`> Generated ${new Date().toISOString()}`);
   lines.push('');

@@ -17,7 +17,7 @@ function strikeThrough(text: string): string {
 }
 
 /**
- * TreeView sidebar for the Self Review task list.
+ * TreeView sidebar for the Copilot Review Agent task list.
  * Two-level hierarchy: File (collapsible) > Finding (leaf)
  * With a summary item at the root.
  */
@@ -269,7 +269,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
 
     // Click navigates to the finding
     item.command = {
-      command: 'selfReview.goToFinding',
+      command: 'copilotReviewAgent.goToFinding',
       title: 'Go to Finding',
       arguments: [finding.id],
     };

@@ -12,9 +12,9 @@ export class CommentManager {
   private threadToFindingId: WeakMap<vscode.CommentThread, string> = new WeakMap();
 
   constructor() {
-    this.controller = vscode.comments.createCommentController('self-review', 'Self Review');
+    this.controller = vscode.comments.createCommentController('copilot-review-agent', 'Copilot Review Agent');
     this.controller.options = {
-      prompt: 'Self Review finding',
+      prompt: 'Copilot Review Agent finding',
       placeHolder: 'AI-generated review comment',
     };
     // No commentingRangeProvider — we don't want users to manually add comments
@@ -38,7 +38,7 @@ export class CommentManager {
       body,
       mode: vscode.CommentMode.Preview,
       author: {
-        name: `Self Review [${finding.severity.toUpperCase()}]`,
+        name: `Copilot Review Agent [${finding.severity.toUpperCase()}]`,
       },
       label: finding.category,
     };

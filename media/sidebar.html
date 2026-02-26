@@ -786,7 +786,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
         instrRow.classList.remove('hidden');
         if (exists) {
           instrDot.className = 'dot active';
-          instrText.textContent = '.self-review-instructions.md';
+          instrText.textContent = '.copilot-review-agent-instructions.md';
           instrAction.textContent = 'Open';
           instrAction.onclick = () => vscode.postMessage({ type: 'openInstructions' });
         } else {
