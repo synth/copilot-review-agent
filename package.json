@@ -1,0 +1,303 @@
+{
+  "name": "self-review",
+  "displayName": "Self Review — AI Branch Review",
+  "description": "Diff your branch against a base, get AI-powered review findings as inline comments with a task list sidebar.",
+  "version": "0.1.0",
+  "publisher": "recognize",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "code review",
+    "AI",
+    "diff",
+    "git",
+    "copilot"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:selfReview.controlPanel",
+    "onView:selfReview.taskList"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "selfReview.reviewBranch",
+        "title": "Self Review: Review Branch",
+        "icon": "$(play)"
+      },
+      {
+        "command": "selfReview.reviewFile",
+        "title": "Self Review: Review Current File",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "selfReview.clearReview",
+        "title": "Self Review: Clear All Findings",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "selfReview.exportMarkdown",
+        "title": "Self Review: Export Findings as Markdown",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "selfReview.refreshReview",
+        "title": "Self Review: Re-run Review",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "selfReview.selectBaseBranch",
+        "title": "Self Review: Change Base Branch"
+      },
+      {
+        "command": "selfReview.selectTargetBranch",
+        "title": "Self Review: Change Target Branch"
+      },
+      {
+        "command": "selfReview.initConfig",
+        "title": "Self Review: Initialize Config File"
+      },
+      {
+        "command": "selfReview.skipFinding",
+        "title": "Skip",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "selfReview.fixInline",
+        "title": "Fix Inline",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "selfReview.fixInChat",
+        "title": "Fix in Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "selfReview.fixInEdits",
+        "title": "Fix in Edits",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "selfReview.goToFinding",
+        "title": "Go to Finding",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "selfReview.skipTreeItem",
+        "title": "Skip",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "selfReview.fixTreeItem",
+        "title": "Fix Inline",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "selfReview.fixAllInFile",
+        "title": "Fix All in File",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "selfReview.sortFindings",
+        "title": "Sort Findings",
+        "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "selfReview.backToHistory",
+        "title": "Back to History",
+        "icon": "$(arrow-left)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "self-review",
+          "title": "Self Review",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "self-review": [
+        {
+          "type": "webview",
+          "id": "selfReview.controlPanel",
+          "name": "Review Controls",
+          "visibility": "visible"
+        },
+        {
+          "id": "selfReview.taskList",
+          "name": "Review Findings",
+          "when": "selfReview.hasReview",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "selfReview.taskList",
+        "contents": "No review findings yet."
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "selfReview.backToHistory",
+          "when": "view == selfReview.taskList && selfReview.inReviewDetail",
+          "group": "navigation@0"
+        },
+        {
+          "command": "selfReview.sortFindings",
+          "when": "view == selfReview.taskList",
+          "group": "navigation@0"
+        },
+        {
+          "command": "selfReview.refreshReview",
+          "when": "view == selfReview.taskList",
+          "group": "navigation@1"
+        },
+        {
+          "command": "selfReview.clearReview",
+          "when": "view == selfReview.taskList",
+          "group": "navigation@2"
+        },
+        {
+          "command": "selfReview.exportMarkdown",
+          "when": "view == selfReview.taskList",
+          "group": "overflow"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "selfReview.goToFinding",
+          "when": "view == selfReview.taskList && viewItem == finding",
+          "group": "inline@1"
+        },
+        {
+          "command": "selfReview.skipTreeItem",
+          "when": "view == selfReview.taskList && viewItem == finding",
+          "group": "inline@2"
+        },
+        {
+          "command": "selfReview.fixTreeItem",
+          "when": "view == selfReview.taskList && viewItem == finding",
+          "group": "inline@3"
+        },
+        {
+          "command": "selfReview.fixAllInFile",
+          "when": "view == selfReview.taskList && viewItem == fileGroup",
+          "group": "inline@1"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "selfReview.skipFinding",
+          "when": "commentController == self-review",
+          "group": "inline@1"
+        },
+        {
+          "command": "selfReview.fixInline",
+          "when": "commentController == self-review",
+          "group": "inline@2"
+        },
+        {
+          "command": "selfReview.fixInChat",
+          "when": "commentController == self-review",
+          "group": "inline@3"
+        },
+        {
+          "command": "selfReview.fixInEdits",
+          "when": "commentController == self-review",
+          "group": "inline@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Self Review",
+      "properties": {
+        "selfReview.baseBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Default base branch to diff against."
+        },
+        "selfReview.targetBranch": {
+          "type": "string",
+          "default": "",
+          "description": "Default target branch. Empty means current HEAD + working tree."
+        },
+        "selfReview.includeUncommitted": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include uncommitted changes when target matches current checkout."
+        },
+        "selfReview.severityThreshold": {
+          "type": "string",
+          "default": "low",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Minimum severity level to include in findings."
+        },
+        "selfReview.excludePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "vendor/**",
+            "node_modules/**",
+            "db/schema.rb"
+          ],
+          "description": "Glob patterns of files to exclude from review."
+        },
+        "selfReview.maxFilesPerChunk": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Max files to include per AI review chunk."
+        },
+        "selfReview.contextLines": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Number of surrounding lines of context to include around each changed hunk when building the review prompt. Lower values reduce token usage; higher values give the AI more surrounding context. Overlapping context windows for nearby hunks are automatically merged."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "selfReview.reviewBranch",
+        "key": "ctrl+shift+alt+r",
+        "mac": "cmd+shift+alt+r"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && vsce package --no-dependencies",
+    "lint": "tsc --noEmit",
+    "test": "TS_NODE_PROJECT=tsconfig.test.json mocha --require ts-node/register 'test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
