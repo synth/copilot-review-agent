@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "recognize",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/synth/copilot-review-agent"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
