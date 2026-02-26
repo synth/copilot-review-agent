@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 
 /** Severity levels for review findings */
@@ -45,7 +46,9 @@ export interface DiffHunk {
   newLines: number;
   header: string;
   content: string;
+  /** 1-based line numbers (in the new file) that were added by this hunk. */
   addedLines: number[];
+  /** 1-based line numbers (in the old file) that were removed by this hunk. */
   removedLines: number[];
 }
 
@@ -81,6 +84,7 @@ export interface SelfReviewConfig {
   severityThreshold: Severity;
   excludePaths: string[];
   maxFilesPerChunk: number;
+  contextLines: number;
   categories: Category[];
   customInstructions: string;
   maxFindings: number;
@@ -116,7 +120,7 @@ export function severityRank(severity: Severity): number {
 
 /** Generates a unique finding ID */
 export function nextFindingId(): string {
-  return `sr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `sr-${randomUUID()}`;
 }
 
 /** A persisted review session (for history) */
@@ -147,5 +151,5 @@ export interface ReviewSessionSummary {
 
 /** Generates a unique review session ID */
 export function nextSessionId(): string {
-  return `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `review-${randomUUID()}`;
 }

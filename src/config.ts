@@ -8,6 +8,7 @@ const DEFAULT_CONFIG: SelfReviewConfig = {
   severityThreshold: 'low',
   excludePaths: ['vendor/**', 'node_modules/**', 'db/schema.rb'],
   maxFilesPerChunk: 5,
+  contextLines: 10,
   categories: ['security', 'performance', 'correctness', 'maintainability', 'testing', 'style'],
   customInstructions: '',
   maxFindings: 50,
@@ -66,6 +67,7 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
   const userSeverity = userValue<string>('severityThreshold');
   const userExcludePaths = userValue<string[]>('excludePaths');
   const userMaxFilesPerChunk = userValue<number>('maxFilesPerChunk');
+  const userContextLines = userValue<number>('contextLines');
 
   if (userSeverity !== undefined && !isValidSeverity(userSeverity)) {
     vscode.window.showWarningMessage(`Self Review: Invalid severityThreshold "${userSeverity}". Using default.`);
@@ -78,6 +80,7 @@ export async function loadConfig(): Promise<SelfReviewConfig> {
     severityThreshold: isValidSeverity(userSeverity) ? userSeverity : (fileConfig.severityThreshold ?? DEFAULT_CONFIG.severityThreshold),
     excludePaths: userExcludePaths ?? fileConfig.excludePaths ?? DEFAULT_CONFIG.excludePaths,
     maxFilesPerChunk: userMaxFilesPerChunk ?? fileConfig.maxFilesPerChunk ?? DEFAULT_CONFIG.maxFilesPerChunk,
+    contextLines: userContextLines ?? fileConfig.contextLines ?? DEFAULT_CONFIG.contextLines,
     categories: fileConfig.categories ?? DEFAULT_CONFIG.categories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings ?? DEFAULT_CONFIG.maxFindings,
@@ -152,6 +155,7 @@ interface FileConfig {
   severityThreshold?: Severity;
   excludePaths?: string[];
   maxFilesPerChunk?: number;
+  contextLines?: number;
   categories?: Category[];
   customInstructions?: string;
   maxFindings?: number;
@@ -180,6 +184,7 @@ async function loadYamlConfig(): Promise<FileConfig> {
     const rawIncludeUncommitted = parsed['include_uncommitted'];
     const rawSeverityThreshold = parsed['severity_threshold'];
     const rawMaxFilesPerChunk = parsed['max_files_per_chunk'];
+    const rawContextLines = parsed['context_lines'];
     const rawMaxFindings = parsed['max_findings'];
 
     if (rawSeverityThreshold !== undefined && !isValidSeverity(rawSeverityThreshold)) {
@@ -197,6 +202,7 @@ async function loadYamlConfig(): Promise<FileConfig> {
         ? parsed['exclude_paths']
         : undefined,
       maxFilesPerChunk: Number.isFinite(rawMaxFilesPerChunk) ? rawMaxFilesPerChunk as number : undefined,
+      contextLines: Number.isFinite(rawContextLines) ? rawContextLines as number : undefined,
       categories: Array.isArray(parsed['categories']) && parsed['categories'].every(isValidCategory)
         ? parsed['categories']
         : undefined,

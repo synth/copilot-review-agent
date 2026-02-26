@@ -12,37 +12,51 @@ export class FixActions {
   ) {}
 
   /**
-   * Fix Inline: Open inline chat with the finding context so Copilot generates
-   * the fix directly in the editor, providing keep/undo controls.
-   * Returns true if the inline chat was successfully initiated (not that the fix was applied).
+   * Opens the file for a finding and selects the relevant lines in the editor.
+   * Returns the active TextEditor on success, or null if the file was not found.
    */
-  async fixInline(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
+  private async openAndSelectFindingLines(
+    finding: ReviewFinding,
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<vscode.TextEditor | null> {
     const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
     const uri = vscode.Uri.file(filePath);
     try {
       await vscode.workspace.fs.stat(uri);
     } catch {
       vscode.window.showErrorMessage(`File not found: ${finding.file}`);
-      return false;
+      return null;
     }
     const doc = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(doc);
 
     // Select the relevant lines (clamp to valid document range)
-    const lines = doc.lineCount;
-    const startLine = Math.max(0, Math.min(lines - 1, finding.startLine - 1));
-    const endLine = Math.max(startLine, Math.min(lines - 1, finding.endLine - 1));
+    const startLine = Math.max(0, Math.min(doc.lineCount - 1, finding.startLine - 1));
+    const endLine = Math.max(startLine, Math.min(doc.lineCount - 1, finding.endLine - 1));
     editor.selection = new vscode.Selection(
       new vscode.Position(startLine, 0),
       new vscode.Position(endLine, doc.lineAt(endLine).text.length)
     );
+    return editor;
+  }
+
+  /**
+   * Fix Inline: Open inline chat with the finding context so Copilot generates
+   * the fix directly in the editor, providing keep/undo controls.
+   * Returns true if the inline chat was successfully initiated (not that the fix was applied).
+   */
+  async fixInline(finding: ReviewFinding, workspaceFolder: vscode.WorkspaceFolder): Promise<boolean> {
+    const editor = await this.openAndSelectFindingLines(finding, workspaceFolder);
+    if (!editor) {
+      return false;
+    }
 
     // Build the prompt for inline chat
     const message = [
       `Fix: ${finding.title}`,
       finding.description,
-      finding.suggestedFix ? `Suggested approach: ${finding.suggestedFix}` : '',
-    ].filter(Boolean).join('\n');
+      ...(finding.suggestedFix ? [`Suggested approach: ${finding.suggestedFix}`] : []),
+    ].join('\n');
 
     try {
       await vscode.commands.executeCommand('inlineChat.start', { message, autoSend: true });
@@ -66,8 +80,8 @@ export class FixActions {
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
       finding.description,
-      finding.suggestedFix ? `\nSuggested approach: ${finding.suggestedFix}` : '',
-    ].filter(Boolean).join('\n');
+      ...(finding.suggestedFix ? [`\nSuggested approach: ${finding.suggestedFix}`] : []),
+    ].join('\n');
 
     try {
       // Open in agent mode so the chat can actually edit files (not just explain)
@@ -75,23 +89,10 @@ export class FixActions {
       return true;
     } catch {
       // Fallback: try inline chat
-      const filePath = path.join(workspaceFolder.uri.fsPath, finding.file);
-      const uri = vscode.Uri.file(filePath);
-      try {
-        await vscode.workspace.fs.stat(uri);
-      } catch {
-        vscode.window.showErrorMessage(`File not found: ${finding.file}`);
+      const editor = await this.openAndSelectFindingLines(finding, workspaceFolder);
+      if (!editor) {
         return false;
       }
-      const doc = await vscode.workspace.openTextDocument(uri);
-      const editor = await vscode.window.showTextDocument(doc);
-
-      const startLine = Math.max(0, Math.min(doc.lineCount - 1, finding.startLine - 1));
-      const endLine = Math.max(startLine, Math.min(doc.lineCount - 1, finding.endLine - 1));
-      editor.selection = new vscode.Selection(
-        new vscode.Position(startLine, 0),
-        new vscode.Position(endLine, doc.lineAt(endLine).text.length)
-      );
 
       try {
         await vscode.commands.executeCommand('inlineChat.start');
@@ -116,8 +117,8 @@ export class FixActions {
       `**${finding.severity.toUpperCase()}**: ${finding.title}`,
       ``,
       finding.description,
-      finding.suggestedFix ? `\nSuggested approach: ${finding.suggestedFix}` : '',
-    ].filter(Boolean).join('\n');
+      ...(finding.suggestedFix ? [`\nSuggested approach: ${finding.suggestedFix}`] : []),
+    ].join('\n');
 
     try {
       // Open in edit mode so Copilot Edits can apply changes directly
@@ -148,10 +149,8 @@ export class FixActions {
         [
           `${i + 1}. **${f.severity.toUpperCase()}** (line ${f.startLine}): ${f.title}`,
           `   ${f.description}`,
-          f.suggestedFix ? `   Suggested approach: ${f.suggestedFix}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n')
+          ...(f.suggestedFix ? [`   Suggested approach: ${f.suggestedFix}`] : []),
+        ].join('\n')
       )
       .join('\n\n');
 

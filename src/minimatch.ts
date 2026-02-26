@@ -14,22 +14,33 @@
 
 const braceWarned = new Set<string>();
 const MAX_BRACE_WARNING_CACHE = 100;
+let braceLimitWarned = false;
+
+const regexCache = new Map<string, RegExp>();
+const MAX_REGEX_CACHE = 100;
 
 /** Clears the brace-warning state. Useful when re-running tests in the same process. */
 export function resetWarnings(): void {
   braceWarned.clear();
+  braceLimitWarned = false;
+  regexCache.clear();
 }
 
 export function minimatch(filePath: string, pattern: string): boolean {
   if (pattern.includes('{') && !braceWarned.has(pattern)) {
-    // Only add to the warning cache if we haven't reached the limit
     if (braceWarned.size < MAX_BRACE_WARNING_CACHE) {
       braceWarned.add(pattern);
+      console.warn(
+        `[self-review] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
+        `Brace expansion is not supported — the pattern will be matched literally.`
+      );
+    } else if (!braceLimitWarned) {
+      braceLimitWarned = true;
+      console.warn(
+        `[self-review] Further brace-expansion warnings suppressed (more than ${MAX_BRACE_WARNING_CACHE} distinct patterns seen). ` +
+        `These patterns are still matched literally, not expanded.`
+      );
     }
-    console.warn(
-      `[self-review] Glob pattern "${pattern}" contains "{" which looks like brace expansion. ` +
-      `Brace expansion is not supported — the pattern will be matched literally.`
-    );
   }
 
   const regex = globToRegex(pattern);
@@ -39,13 +50,18 @@ export function minimatch(filePath: string, pattern: string): boolean {
 /**
  * Escape a single character if it is special in a regular expression.
  * Covers the full set of RegExp-special characters:
- *   \ ^ $ . * + ? ( ) [ ] { } | -
- * `*` and `?` are handled by the glob parser above, so they never
- * reach this helper during normal operation.
+ *   \ ^ $ . + ( ) [ ] { } | -
+ * `*` and `?` are intentionally omitted — they are glob metacharacters
+ * consumed by the parser above and must not be re-escaped here.
  */
-const REGEX_SPECIAL = /[-\\^$.*+?()[\]{}|]/g;
+const REGEX_SPECIAL = /[-\\^$.+()[\]{}|]/g;
 
 function globToRegex(pattern: string): RegExp {
+  const cached = regexCache.get(pattern);
+  if (cached) {
+    return cached;
+  }
+
   let regexStr = '';
   let i = 0;
 
@@ -82,5 +98,9 @@ function globToRegex(pattern: string): RegExp {
     }
   }
 
-  return new RegExp(`^${regexStr}$`);
+  const regex = new RegExp(`^${regexStr}$`);
+  if (regexCache.size < MAX_REGEX_CACHE) {
+    regexCache.set(pattern, regex);
+  }
+  return regex;
 }

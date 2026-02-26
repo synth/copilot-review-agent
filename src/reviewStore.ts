@@ -13,21 +13,44 @@ export class ReviewStore {
 
   constructor(private readonly state: vscode.Memento) {}
 
-  /** Serialize writes to prevent race conditions */
+  /**
+   * Serialize writes to prevent race conditions.
+   *
+   * The internal lock promise always resolves so the chain is never broken,
+   * but the promise **returned to the caller** will reject if `fn` rejects.
+   * Callers must either `await` the result inside a try/catch or attach a
+   * `.catch()` handler — fire-and-forget usage will produce an unhandled
+   * promise rejection.
+   */
   private async _serialized<T>(fn: () => Promise<T>): Promise<T> {
     const p = this._writeLock.then(fn);
     this._writeLock = p.then(() => {}, (err) => { console.error('ReviewStore write error:', err); });
     return p;
   }
 
-  /** Get all past review sessions, newest first */
+  /**
+   * Get all past review sessions, newest first.
+   *
+   * **Consistency note:** reads directly from `this.state` without acquiring
+   * the serialization lock. If a write is currently in flight the returned
+   * snapshot may not yet reflect that write (eventual consistency). This is
+   * intentional — the synchronous API is kept for convenience since most
+   * callers do not require read-after-write guarantees. If strict
+   * read-after-write consistency is needed, `await` all preceding `save()` /
+   * `delete()` calls before calling this method.
+   *
+   * Data is stored already sorted by `save()`, so no re-sort is needed here.
+   */
   getAll(): ReviewSession[] {
-    const data = this.state.get<ReviewSession[]>(STORAGE_KEY, []);
-    // Ensure newest first
-    return [...data].sort((a, b) => b.timestamp - a.timestamp);
+    return [...this.state.get<ReviewSession[]>(STORAGE_KEY, [])];
   }
 
-  /** Get a single review by ID */
+  /**
+   * Get a single review by ID.
+   *
+   * **Consistency note:** same eventual-consistency caveat as `getAll()` —
+   * reads directly from `this.state` without the serialization lock.
+   */
   get(id: string): ReviewSession | undefined {
     return this.state.get<ReviewSession[]>(STORAGE_KEY, []).find(r => r.id === id);
   }

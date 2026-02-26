@@ -266,6 +266,13 @@
           "minimum": 1,
           "maximum": 50,
           "description": "Max files to include per AI review chunk."
+        },
+        "selfReview.contextLines": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Number of surrounding lines of context to include around each changed hunk when building the review prompt. Lower values reduce token usage; higher values give the AI more surrounding context. Overlapping context windows for nearby hunks are automatically merged."
         }
       }
     },
@@ -281,12 +288,16 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "npm run compile && vsce package --no-dependencies",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "TS_NODE_PROJECT=tsconfig.test.json mocha --require ts-node/register 'test/**/*.test.ts'"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.0.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.0"
   }
 }

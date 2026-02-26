@@ -4,11 +4,14 @@ import { ReviewFinding, severityIcon, severityRank, Severity } from './types';
 /** Apply Unicode combining long stroke overlay (U+0336) to every character. */
 function strikeThrough(text: string): string {
   try {
-    return Array.from(new Intl.Segmenter().segment(text))
+    return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text))
       .map(({ segment }) => segment + '\u0336')
       .join('');
   } catch {
-    // Fallback for environments where Intl.Segmenter is unavailable
+    // Fallback for environments where Intl.Segmenter is unavailable.
+    // Note: this splits on Unicode code points, which handles basic surrogate pairs
+    // correctly, but multi-codepoint grapheme clusters (e.g. flag emoji, skin-tone
+    // modifiers) will be split incorrectly, producing garbled strikethrough text.
     return [...text].map(ch => ch + '\u0336').join('');
   }
 }
@@ -38,7 +41,7 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
   }
 
   getFindings(): ReviewFinding[] {
-    return this.findings;
+    return [...this.findings];
   }
 
   addFindings(newFindings: ReviewFinding[]): void {
@@ -46,24 +49,28 @@ export class TaskListProvider implements vscode.TreeDataProvider<TaskListItem> {
     this.refresh();
   }
 
-  updateFinding(id: string, update: Partial<ReviewFinding>): void {
+  updateFinding(id: string, update: Partial<ReviewFinding>): boolean {
     const finding = this.findings.find(f => f.id === id);
-    if (finding) {
-      // Filter out undefined values to avoid clearing existing fields
-      const filtered = Object.fromEntries(
-        Object.entries(update).filter(([, v]) => v !== undefined)
-      );
-      Object.assign(finding, filtered);
-      this.refresh();
+    if (!finding) { return false; }
+    // Only allow updates to mutable fields; structural fields (id, file, lines, severity, category) are immutable
+    const mutableKeys = ['status', 'title', 'description', 'suggestedFix'] as const;
+    for (const key of mutableKeys) {
+      if (key in update) {
+        (finding as unknown as Record<string, unknown>)[key] = update[key];
+      }
     }
+    this.refresh();
+    return true;
   }
 
   getFinding(id: string): ReviewFinding | undefined {
     return this.findings.find(f => f.id === id);
   }
 
-  getFileFindings(filePath: string): ReviewFinding[] {
-    return this.findings.filter(f => f.file === filePath && f.status === 'open');
+  getFileFindings(filePath: string, statusFilter?: ReviewFinding['status']): ReviewFinding[] {
+    return this.findings
+      .filter(f => f.file === filePath && (!statusFilter || f.status === statusFilter))
+      .map(f => ({ ...f }));
   }
 
   clearAll(): void {

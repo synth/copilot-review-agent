@@ -87,11 +87,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _pendingMessages: WebviewMessage[] = [];
+  private _readyListener?: vscode.Disposable;
+  private _readyTimeout?: ReturnType<typeof setTimeout>;
 
   private readonly _onDidResolveView = new vscode.EventEmitter<vscode.WebviewView>();
-  /** Fires when the webview view is resolved and ready for messages.
-   * Consumers should register webview message handlers synchronously in this callback
-   * to avoid missing early messages from the webview.
+  /**
+   * Fires when the webview view is resolved.
+   *
+   * **Registering message handlers** (`onDidReceiveMessage`): safe to do synchronously
+   * here — the handler will be attached before any webview messages arrive.
+   *
+   * **Posting messages** (`postMessage`): the real sidebar HTML is loaded
+   * asynchronously after this event fires. Messages posted before the HTML sends its
+   * `'ready'` signal are queued and flushed automatically once it does. However, the
+   * queue is capped at `SidebarViewProvider.MAX_PENDING` (currently
+   * {@link SidebarViewProvider.MAX_PENDING}) entries — older messages are dropped when
+   * the cap is reached. Avoid sending large bursts of messages from this callback;
+   * prefer deferring them until after the webview is ready.
    */
   public readonly onDidResolveView = this._onDidResolveView.event;
 
@@ -102,6 +114,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     this._view = undefined;
     this._webviewReady = false;
     this._pendingMessages = [];
+    clearTimeout(this._readyTimeout);
+    this._readyListener?.dispose();
   }
 
   resolveWebviewView(
@@ -114,6 +128,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     // before the old webview's onDidDispose fires, we don't hold stale references.
     this._pendingMessages = [];
     this._webviewReady = false;
+    clearTimeout(this._readyTimeout);
+    this._readyListener?.dispose();
+    this._readyListener = undefined;
 
     this._view = webviewView;
     webviewView.webview.options = {
@@ -121,35 +138,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
       localResourceRoots: [this._extensionUri],
     };
     webviewView.webview.html = this._getPlaceholderHtml();
-    this._loadHtmlAsync(webviewView);
+    // The ready listener and timeout are set up inside _loadHtmlAsync, after the real
+    // HTML is loaded. Registering them here (on the placeholder) would create a race:
+    // if readyTimeout fired before the async load completed, flushPending() would mark
+    // _webviewReady = true and flush messages into the placeholder; when _loadHtmlAsync
+    // then replaced the HTML the webview would reset and those messages would be lost.
+    void this._loadHtmlAsync(webviewView);
 
-    // Wait for the webview JS to signal readiness before flushing queued messages.
-    // A timeout fallback ensures messages aren't queued forever if 'ready' is missed.
-    this._webviewReady = false;
-    const flushPending = () => {
-      if (this._webviewReady) { return; }
-      this._webviewReady = true;
-      readyListener.dispose();
-      for (const pending of this._pendingMessages) {
-        webviewView.webview.postMessage(pending);
-      }
-      this._pendingMessages = [];
-    };
-    // Note: This listener only acts on 'ready' messages. Other messages sent by the
-    // webview before the main handler (registered by the extension host) is set up
-    // will still fire to other listeners. To avoid losing messages like 'loadHistory',
-    // the extension host must register its onDidReceiveMessage handler synchronously
-    // in the onDidResolveView callback.
-    const readyListener = webviewView.webview.onDidReceiveMessage((msg: ExtensionMessage) => {
-      if (msg.type === 'ready') {
-        clearTimeout(readyTimeout);
-        flushPending();
-      }
-    });
-    const readyTimeout = setTimeout(flushPending, SidebarViewProvider.READY_TIMEOUT_MS);
     webviewView.onDidDispose(() => {
-      clearTimeout(readyTimeout);
-      readyListener.dispose();
+      clearTimeout(this._readyTimeout);
+      this._readyListener?.dispose();
+      this._readyListener = undefined;
       this._view = undefined;
       this._webviewReady = false;
       this._pendingMessages = [];
@@ -287,13 +286,52 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
       const htmlUri = vscode.Uri.joinPath(this._extensionUri, 'media', 'sidebar.html');
       const htmlBytes = await vscode.workspace.fs.readFile(htmlUri);
       const html = new TextDecoder().decode(htmlBytes);
+
+      // Warn if any <script> or <style> tag is missing the nonce placeholder — such
+      // tags will be silently blocked by the Content-Security-Policy at runtime.
+      validateNonces(html);
+
       const nonce = getNonce();
       const htmlWithNonce = html.replace(/\{\{NONCE\}\}/g, nonce);
-      
-      // Only update if this webview is still active (hasn't been disposed)
-      if (this._view === webviewView) {
-        webviewView.webview.html = htmlWithNonce;
-      }
+
+      // Bail out if the webview was disposed while we were awaiting the file read.
+      if (this._view !== webviewView) { return; }
+
+      // Reset ready state before swapping HTML. If a previous readyTimeout already
+      // fired and flushed messages into the placeholder, those messages are now lost
+      // (the placeholder had no real handlers). Resetting here ensures the pending
+      // queue is flushed again once the real HTML signals 'ready'.
+      this._webviewReady = false;
+      clearTimeout(this._readyTimeout);
+      this._readyListener?.dispose();
+
+      webviewView.webview.html = htmlWithNonce;
+
+      // Set up the flush-on-ready mechanism now that the real HTML is in place.
+      // Placing this here (not in resolveWebviewView) eliminates the race condition
+      // described above.
+      const flushPending = () => {
+        if (this._view !== webviewView) { return; } // view disposed; don't post into a stale webview
+        if (this._webviewReady) { return; }
+        this._webviewReady = true;
+        this._readyListener?.dispose();
+        this._readyListener = undefined;
+        clearTimeout(this._readyTimeout);
+        for (const pending of this._pendingMessages) {
+          webviewView.webview.postMessage(pending);
+        }
+        this._pendingMessages = [];
+      };
+      // Note: This listener only acts on 'ready' messages. Other messages sent by the
+      // webview before the main handler is set up will still fire to other listeners.
+      // The extension host registers its onDidReceiveMessage handler synchronously in
+      // the onDidResolveView callback, so those messages won't be lost.
+      this._readyListener = webviewView.webview.onDidReceiveMessage((msg: ExtensionMessage) => {
+        if (msg.type === 'ready') {
+          flushPending();
+        }
+      });
+      this._readyTimeout = setTimeout(flushPending, SidebarViewProvider.READY_TIMEOUT_MS);
     } catch (error) {
       console.error('Failed to load sidebar HTML:', error);
       // Keep the placeholder HTML if loading fails
@@ -303,5 +341,30 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
 function getNonce(): string {
   return crypto.randomBytes(16).toString('hex');
+}
+
+/**
+ * Warns at runtime if any `<script>` or `<style>` opening tag in the HTML template
+ * is missing a `nonce="{{NONCE}}"` attribute. The Content-Security-Policy set by the
+ * template blocks all such tags silently, making this easy to miss.
+ */
+function validateNonces(html: string): void {
+  const openingTagPattern = /<(script|style)(\s[^>]*)?>/gi;
+  let match: RegExpExecArray | null;
+  const missing: string[] = [];
+  while ((match = openingTagPattern.exec(html)) !== null) {
+    const [fullTag] = match;
+    if (!fullTag.includes('nonce=')) {
+      missing.push(fullTag.length > 80 ? fullTag.substring(0, 77) + '...' : fullTag);
+    }
+  }
+  if (missing.length > 0) {
+    console.error(
+      '[self-review] sidebar.html contains <script>/<style> tags without a nonce attribute.\n' +
+      'These will be silently blocked by the Content-Security-Policy. ' +
+      'Add nonce="{{NONCE}}" to each:\n' +
+      missing.map(t => `  ${t}`).join('\n')
+    );
+  }
 }
 

@@ -34,24 +34,49 @@ function filePriority(filePath: string): number {
 
 /**
  * Build context strings for a file: the diff hunks plus surrounding file content.
+ *
+ * When hunks are close enough that their context windows overlap, they are
+ * merged into a single annotated block to avoid printing duplicate lines and
+ * inflating token counts.
  */
-function buildFileContext(file: DiffFile, contextLines: number = 30): string {
+export function buildFileContext(file: DiffFile, config: SelfReviewConfig): string {
+  const contextLines = config.contextLines;
   const parts: string[] = [];
   parts.push(`## File: ${file.path}${file.isNew ? ' (new)' : ''}${file.isDeleted ? ' (deleted)' : ''}`);
 
   if (file.fullContent && !file.isDeleted) {
     const fileLines = file.fullContent.split('\n');
 
-    for (const hunk of file.hunks) {
-      const start = Math.max(0, hunk.newStart - 1 - contextLines);
-      const end = Math.min(fileLines.length, hunk.newStart - 1 + hunk.newLines + contextLines);
-      const contextSlice = fileLines.slice(start, end);
-      const addedSet = new Set(hunk.addedLines);
+    // Compute the context window [start, end) for each hunk (0-indexed line positions).
+    const hunkWindows = file.hunks.map(hunk => ({
+      hunk,
+      start: Math.max(0, hunk.newStart - 1 - contextLines),
+      end: Math.min(fileLines.length, hunk.newStart - 1 + hunk.newLines + contextLines),
+    }));
 
-      parts.push(`\n### Hunk at line ${hunk.newStart} ${hunk.header}`);
+    // Merge overlapping or adjacent windows so that close hunks share one block.
+    const merged: Array<{ start: number; end: number; hunks: typeof file.hunks }> = [];
+    for (const w of hunkWindows) {
+      const last = merged[merged.length - 1];
+      if (last && w.start <= last.end) {
+        last.end = Math.max(last.end, w.end);
+        last.hunks.push(w.hunk);
+      } else {
+        merged.push({ start: w.start, end: w.end, hunks: [w.hunk] });
+      }
+    }
+
+    for (const window of merged) {
+      const contextSlice = fileLines.slice(window.start, window.end);
+      const addedSet = new Set(window.hunks.flatMap(h => h.addedLines));
+
+      const hunkHeader = window.hunks.length === 1
+        ? `line ${window.hunks[0].newStart} ${window.hunks[0].header}`
+        : window.hunks.map(h => `line ${h.newStart}`).join(', ');
+      parts.push(`\n### Hunk at ${hunkHeader}`);
       parts.push('```');
       contextSlice.forEach((line, idx) => {
-        const lineNum = start + idx + 1;
+        const lineNum = window.start + idx + 1;
         const isAdded = addedSet.has(lineNum);
         const prefix = isAdded ? '+' : ' ';
         parts.push(`${prefix}${String(lineNum).padStart(5)} | ${line}`);
@@ -104,7 +129,7 @@ export function chunkDiffFiles(
   let currentTokens = 0;
 
   for (const file of sorted) {
-    const context = buildFileContext(file);
+    const context = buildFileContext(file, config);
     const tokens = estimateTokens(context);
 
     // If this single file exceeds the budget, give it its own chunk
@@ -146,6 +171,6 @@ export function chunkDiffFiles(
 /**
  * Build the full context string for a chunk, ready to be sent to the AI.
  */
-export function buildChunkContext(chunk: DiffChunk): string {
-  return chunk.files.map(f => buildFileContext(f)).join('\n\n---\n\n');
+export function buildChunkContext(chunk: DiffChunk, config: SelfReviewConfig): string {
+  return chunk.files.map(f => buildFileContext(f, config)).join('\n\n---\n\n');
 }

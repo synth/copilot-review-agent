@@ -27,8 +27,11 @@ export class ReviewEngine {
 
   /**
    * List all available Copilot language models.
+   * Clears the cached model so that the next call to ensureModel() will
+   * re-select from the current model list (handles subscription changes, etc.).
    */
   async listModels(): Promise<vscode.LanguageModelChat[]> {
+    this.model = undefined;
     return vscode.lm.selectChatModels({ vendor: 'copilot' });
   }
 
@@ -52,11 +55,12 @@ export class ReviewEngine {
     }
 
     // Auto-select: prefer models by explicit priority (claude > gpt-4 > others).
-    // This is more robust than substring matching on family names, which could
-    // inadvertently match unintended models (e.g., 'gpt-4-mini' or 'claude-instant').
+    // Use startsWith so that versioned family names such as 'claude-sonnet',
+    // 'claude-3.5-sonnet', 'gpt-4o', and 'gpt-4-turbo' are all matched by their
+    // respective prefix patterns.
     const modelPreference = ['claude', 'gpt-4'];
     for (const pattern of modelPreference) {
-      const candidate = models.find(m => m.family === pattern);
+      const candidate = models.find(m => m.family.startsWith(pattern));
       if (candidate) {
         this.model = candidate;
         return this.model;
@@ -164,7 +168,7 @@ If there are no findings, respond with: []`;
     onToken?: (fragment: string) => void
   ): Promise<ReviewFinding[]> {
     const systemPrompt = this.buildSystemPrompt(config);
-    const chunkContext = buildChunkContext(chunk);
+    const chunkContext = buildChunkContext(chunk, config);
 
     // Note: The VS Code Language Model Chat API does not currently expose a
     // dedicated System message role for most models. As a workaround, we send
@@ -249,9 +253,11 @@ If there are no findings, respond with: []`;
     }
 
     const threshold = severityRank(config.severityThreshold);
+    const validSeverities = new Set<string>(['blocker', 'high', 'medium', 'low', 'nit']);
 
     return rawFindings
       .filter(f => f.file && f.startLine != null && f.title)
+      .filter(f => validSeverities.has(f.severity || 'low'))
       .filter(f => severityRank((f.severity || 'low') as Severity) >= threshold)
       .slice(0, config.maxFindings)
       .map(f => ({

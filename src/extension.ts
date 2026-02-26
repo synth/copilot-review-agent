@@ -20,6 +20,11 @@ import { ReviewSession, ReviewAgentStep, nextSessionId } from './types';
 let activeTokenSource: vscode.CancellationTokenSource | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+  // Clean up any leftover state from a previous activation (e.g. extension host restart)
+  activeTokenSource?.cancel();
+  activeTokenSource?.dispose();
+  activeTokenSource = undefined;
+
   /** Per-activation mutable state */
   let currentSelection: BranchSelection | undefined;
   let currentSessionId: string | undefined;
@@ -128,6 +133,10 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMAND: Review Branch
   // ============================================================
   const reviewBranchCmd = vscode.commands.registerCommand('selfReview.reviewBranch', async (args?: { baseBranch?: string; targetBranch?: string }) => {
+    if (reviewInProgress) {
+      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      return;
+    }
     try {
       const wsFolder = getWorkspaceFolder();
       const config = await loadConfig();
@@ -196,6 +205,10 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMAND: Review Current File
   // ============================================================
   const reviewFileCmd = vscode.commands.registerCommand('selfReview.reviewFile', async () => {
+    if (reviewInProgress) {
+      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      return;
+    }
     try {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -240,8 +253,12 @@ export function activate(context: vscode.ExtensionContext) {
   // COMMAND: Refresh Review (re-run with same branches)
   // ============================================================
   const refreshCmd = vscode.commands.registerCommand('selfReview.refreshReview', async () => {
+    if (reviewInProgress) {
+      vscode.window.showWarningMessage('Self Review: A review is already in progress.');
+      return;
+    }
     if (!currentSelection) {
-      vscode.commands.executeCommand('selfReview.reviewBranch');
+      await vscode.commands.executeCommand('selfReview.reviewBranch');
       return;
     }
     try {
@@ -260,7 +277,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   // COMMAND: Clear Review
   // ============================================================
-  const clearCmd = vscode.commands.registerCommand('selfReview.clearReview', () => {
+  const clearCmd = vscode.commands.registerCommand('selfReview.clearReview', async () => {
     commentManager.clearAll();
     taskListProvider.clearAll();
     currentSelection = undefined;
@@ -268,7 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
     sidebarProvider.resetReview();
     if (controlPanelHidden) {
       try {
-        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
         controlPanelHidden = false;
       } catch {
         // Panel state may have desynced; ignore error
@@ -377,7 +394,8 @@ export function activate(context: vscode.ExtensionContext) {
   // ============================================================
   function persistFindings(): void {
     if (currentSessionId) {
-      reviewStore.updateFindings(currentSessionId, taskListProvider.getFindings());
+      reviewStore.updateFindings(currentSessionId, taskListProvider.getFindings())
+        .catch(err => console.error('Failed to persist findings:', err));
     }
   }
 
@@ -399,13 +417,17 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-
-    const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
-    if (initiated) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
-      updateStatusBar('findings');
-      persistFindings();
+    try {
+      const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
+      if (initiated) {
+        commentManager.resolveFinding(findingId);
+        taskListProvider.updateFinding(findingId, { status: 'fixed' });
+        updateStatusBar('findings');
+        persistFindings();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
   });
 
@@ -414,12 +436,17 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    const initiated = await fixActions.fixInChat(finding, getWorkspaceFolder());
-    if (initiated) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
-      updateStatusBar('findings');
-      persistFindings();
+    try {
+      const initiated = await fixActions.fixInChat(finding, getWorkspaceFolder());
+      if (initiated) {
+        commentManager.resolveFinding(findingId);
+        taskListProvider.updateFinding(findingId, { status: 'fixed' });
+        updateStatusBar('findings');
+        persistFindings();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
   });
 
@@ -428,12 +455,17 @@ export function activate(context: vscode.ExtensionContext) {
     if (!findingId) { return; }
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
-    const initiated = await fixActions.fixInEdits(finding, getWorkspaceFolder());
-    if (initiated) {
-      commentManager.resolveFinding(findingId);
-      taskListProvider.updateFinding(findingId, { status: 'fixed' });
-      updateStatusBar('findings');
-      persistFindings();
+    try {
+      const initiated = await fixActions.fixInEdits(finding, getWorkspaceFolder());
+      if (initiated) {
+        commentManager.resolveFinding(findingId);
+        taskListProvider.updateFinding(findingId, { status: 'fixed' });
+        updateStatusBar('findings');
+        persistFindings();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
   });
 
@@ -447,18 +479,23 @@ export function activate(context: vscode.ExtensionContext) {
     const finding = taskListProvider.getFinding(findingId);
     if (!finding) { return; }
 
-    const wsFolder = getWorkspaceFolder();
-    const uri = vscode.Uri.joinPath(wsFolder.uri, finding.file);
-    const doc = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(doc);
+    try {
+      const wsFolder = getWorkspaceFolder();
+      const uri = vscode.Uri.joinPath(wsFolder.uri, finding.file);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(doc);
 
-    const startLine = Math.max(0, finding.startLine - 1);
-    const range = new vscode.Range(
-      new vscode.Position(startLine, 0),
-      new vscode.Position(startLine, 0)
-    );
-    editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-    editor.selection = new vscode.Selection(range.start, range.start);
+      const startLine = Math.max(0, finding.startLine - 1);
+      const range = new vscode.Range(
+        new vscode.Position(startLine, 0),
+        new vscode.Position(startLine, 0)
+      );
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+      editor.selection = new vscode.Selection(range.start, range.start);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
+    }
   });
 
   const skipTreeItemCmd = vscode.commands.registerCommand('selfReview.skipTreeItem', (item: TaskListItem) => {
@@ -474,29 +511,38 @@ export function activate(context: vscode.ExtensionContext) {
     if (!item.findingId) { return; }
     const finding = taskListProvider.getFinding(item.findingId);
     if (!finding) { return; }
-
-    const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
-    if (initiated) {
-      commentManager.resolveFinding(item.findingId);
-      taskListProvider.updateFinding(item.findingId, { status: 'fixed' });
-      updateStatusBar('findings');
-      persistFindings();
+    try {
+      const initiated = await fixActions.fixInline(finding, getWorkspaceFolder());
+      if (initiated) {
+        commentManager.resolveFinding(item.findingId);
+        taskListProvider.updateFinding(item.findingId, { status: 'fixed' });
+        updateStatusBar('findings');
+        persistFindings();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
   });
 
   const fixAllInFileCmd = vscode.commands.registerCommand('selfReview.fixAllInFile', async (item: TaskListItem) => {
     if (!item.filePath) { return; }
-    const findings = taskListProvider.getFileFindings(item.filePath);
-    const success = await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
+    try {
+      const findings = taskListProvider.getFileFindings(item.filePath, 'open');
+      const success = await fixActions.fixAllInFile(findings, item.filePath, getWorkspaceFolder());
 
-    // Only mark findings as fixed if the operation succeeded
-    if (success) {
-      for (const finding of findings) {
-        commentManager.resolveFinding(finding.id);
-        taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+      // Only mark findings as fixed if the operation succeeded
+      if (success) {
+        for (const finding of findings) {
+          commentManager.resolveFinding(finding.id);
+          taskListProvider.updateFinding(finding.id, { status: 'fixed' });
+        }
+        updateStatusBar('findings');
+        persistFindings();
       }
-      updateStatusBar('findings');
-      persistFindings();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Self Review: ${msg}`);
     }
   });
 
@@ -511,7 +557,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // HELPER: navigate back to history list
-  function backToHistory(): void {
+  async function backToHistory(): Promise<void> {
     commentManager.clearAll();
     taskListProvider.clearAll();
     currentSessionId = undefined;
@@ -522,7 +568,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('setContext', 'selfReview.inReviewDetail', false);
     if (controlPanelHidden) {
       try {
-        vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+        await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
         controlPanelHidden = false;
       } catch {
         // Panel state may have desynced; ignore error
@@ -575,7 +621,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
                 // Validate branch names to prevent command injection.
                 // targetBranch may be empty (meaning current HEAD/working tree), which is valid.
-                const safeBranchPattern = /^[a-zA-Z0-9_./@~^:+\-]+$/;
+                const safeBranchPattern = /^[a-zA-Z0-9_./@-]+$/;
                 const targetOk = payload.targetBranch === '' || safeBranchPattern.test(payload.targetBranch);
                 if (!safeBranchPattern.test(payload.baseBranch) || !targetOk) {
                   vscode.window.showErrorMessage('Invalid branch name format.');
@@ -709,7 +755,14 @@ export function activate(context: vscode.ExtensionContext) {
                 currentSessionId = session.id;
 
                 taskListProvider.setFindings(session.findings);
-                const wsFolder = getWorkspaceFolder();
+                let wsFolder: vscode.WorkspaceFolder;
+                try {
+                  wsFolder = getWorkspaceFolder();
+                } catch (err: unknown) {
+                  const msg2 = err instanceof Error ? err.message : String(err);
+                  vscode.window.showErrorMessage(`Self Review: ${msg2}`);
+                  break;
+                }
                 for (const finding of session.findings) {
                   commentManager.addFinding(finding, wsFolder);
                 }
@@ -738,7 +791,7 @@ export function activate(context: vscode.ExtensionContext) {
                 // Minimize Review Controls and focus findings for past review too
                 if (!controlPanelHidden) {
                   try {
-                    vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+                    await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
                     controlPanelHidden = true;
                   } catch {
                     // Panel state may have desynced; ignore error
@@ -766,7 +819,7 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               }
               case 'backToHistory': {
-                backToHistory();
+                await backToHistory();
                 break;
               }
             }
@@ -881,8 +934,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (activeTokenSource) {
       activeTokenSource.cancel();
-      activeTokenSource.dispose();
-      activeTokenSource = undefined;
+      // Let the previous runReview's finally block handle dispose
     }
     updateStatusBar('reviewing');
     sidebar.setReviewState('reviewing');
@@ -940,6 +992,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Self Review: No changes found between the branches.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
+        reviewInProgress = false;
         return;
       }
       sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done' });
@@ -956,6 +1009,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Self Review: All changed files are excluded.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
+        reviewInProgress = false;
         return;
       }
       sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: `${diffFiles.length} file${diffFiles.length !== 1 ? 's' : ''} changed` });
@@ -1078,8 +1132,11 @@ export function activate(context: vscode.ExtensionContext) {
       const wasCancelled = token.isCancellationRequested;
 
       if (wasCancelled && allFindings.length === 0) {
+        const cancelTaskId = nextTaskId();
+        sidebar.addTask({ id: cancelTaskId, label: 'Review cancelled', status: 'done', detail: 'Cancelled before any findings were collected' });
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
+        reviewInProgress = false;
         return;
       }
 
@@ -1120,7 +1177,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Minimize the Review Controls panel and focus the findings tree
       if (!controlPanelHidden) {
         try {
-          vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
+          await vscode.commands.executeCommand('selfReview.controlPanel.toggleVisibility');
           controlPanelHidden = true;
         } catch {
           // Panel state may have desynced; ignore error
@@ -1208,8 +1265,10 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
     }
   }
 
-  // Deduplicate within each file
+  // Deduplicate within each file, using a per-file accumulator so the
+  // near-duplicate check only scans findings in the same file (O(n²) per file).
   for (const fileFindings of findingsByFile.values()) {
+    const fileResult: ReviewFinding[] = [];
     for (const f of fileFindings) {
       const normalizedTokens = normalizeTitleTokens(f.title);
       const normalizedTitle = normalizedTokens.join(' ');
@@ -1217,16 +1276,16 @@ function deduplicateFindings(findings: ReviewFinding[]): ReviewFinding[] {
       if (seen.has(key)) { continue; }
 
       // Only check for near-duplicates within the same file
-      const hasNearDuplicate = result.some(r =>
-        r.file === f.file
-        && rangesOverlap(r.startLine, r.endLine, f.startLine, f.endLine)
+      const hasNearDuplicate = fileResult.some(r =>
+        rangesOverlap(r.startLine, r.endLine, f.startLine, f.endLine)
         && titleSimilarity(normalizeTitleTokens(r.title), normalizedTokens) >= 0.6
       );
       if (hasNearDuplicate) { continue; }
 
       seen.add(key);
-      result.push(f);
+      fileResult.push(f);
     }
+    result.push(...fileResult);
   }
 
   return result;
