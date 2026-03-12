@@ -130,6 +130,7 @@ export interface ReviewSession {
   baseBranch: string;
   targetBranch: string;
   modelId?: string;
+  modelLabel?: string;
   findings: ReviewFinding[];
   agentSteps: ReviewAgentStep[];
   summary?: ReviewSessionSummary;

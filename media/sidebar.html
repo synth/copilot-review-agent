@@ -280,6 +280,11 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 .history-item .hi-stats {
   font-size: 11px; color: var(--vscode-descriptionForeground); display: flex; align-items: center;
 }
+.history-item .hi-meta {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
 .hi-badge {
   display: inline-block; padding: 0 5px; border-radius: 8px;
   font-size: 10px; font-weight: 600; margin-right: 4px;
@@ -322,6 +327,11 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 }
 .detail-header .dh-branches { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .detail-header .dh-date { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.detail-header .dh-model {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+}
 
 /* ═══════════════════════════════════════════════
    Instructions indicator
@@ -456,6 +466,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       <span class="branch-tag" id="dh-target">—</span>
     </div>
     <div class="dh-date" id="dh-date"></div>
+    <div class="dh-model hidden" id="dh-model"></div>
   </div>
 
   <!-- New review controls -->
@@ -525,6 +536,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   const dhBase   = document.getElementById('dh-base');
   const dhTarget = document.getElementById('dh-target');
   const dhDate   = document.getElementById('dh-date');
+  const dhModel  = document.getElementById('dh-model');
 
   const baseSelect   = document.getElementById('base-branch');
   const targetSelect = document.getElementById('target-branch');
@@ -609,6 +621,7 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       const row = document.createElement('div');
       row.className = 'history-item';
       const target = item.targetBranch || 'HEAD + wt';
+      const modelText = formatModelLabel(item.modelLabel, item.modelId);
       const dateStr = formatDate(item.timestamp);
       const hasOpen = item.openCount > 0;
       const header = el('div', { cls: 'hi-header', children: [
@@ -632,6 +645,9 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 
       row.appendChild(header);
       row.appendChild(stats);
+      if (modelText) {
+        row.appendChild(el('div', { cls: 'hi-meta', text: 'Model: ' + modelText }));
+      }
 
       row.addEventListener('click', (e) => {
         if (deleteBtn.contains(e.target)) return;
@@ -656,6 +672,10 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     if (hr < 24) return hr + 'h ago';
     if (day < 7) return day + 'd ago';
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  function formatModelLabel(modelLabel, modelId) {
+    return modelLabel || modelId || '';
   }
 
   /** Create an element with optional className, text content, and children. */
@@ -916,6 +936,14 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
           dhBase.textContent = data.baseBranch;
           dhTarget.textContent = data.targetBranch || 'HEAD + wt';
           dhDate.textContent = new Date(data.timestamp).toLocaleString();
+          const modelText = formatModelLabel(data.modelLabel, data.modelId);
+          if (modelText) {
+            dhModel.textContent = 'Model: ' + modelText;
+            dhModel.classList.remove('hidden');
+          } else {
+            dhModel.textContent = '';
+            dhModel.classList.add('hidden');
+          }
           tasksContainer.innerHTML = '';
           tasks.clear();
           agentLoop.classList.add('visible');
@@ -937,6 +965,8 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
         } else {
           pastReviewHeader.classList.add('hidden');
           newReviewControls.classList.remove('hidden');
+          dhModel.textContent = '';
+          dhModel.classList.add('hidden');
           resetDetailState();
         }
         break;

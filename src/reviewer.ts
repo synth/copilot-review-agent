@@ -25,6 +25,17 @@ export class ReviewEngine {
     return this._selectedModelId;
   }
 
+  /** Return the resolved model ID for the current review session. */
+  get activeModelId(): string | undefined {
+    return this.model?.id;
+  }
+
+  /** Return the resolved model label for the current review session. */
+  get activeModelLabel(): string | undefined {
+    if (!this.model) { return undefined; }
+    return this.model.name || this.model.family || this.model.id;
+  }
+
   /**
    * List all available Copilot language models.
    * Clears the cached model so that the next call to ensureModel() will
