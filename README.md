@@ -59,9 +59,11 @@ Use this when you're actively developing and want to iterate quickly:
    ```bash
    npm run watch
    ```
-2. In VS Code, press `Cmd+Shift+P` → **Developer: Reload Window**
+2. In VS Code, open the **Run** menu and choose **Start Debugging** (or press `F5`). This launches a new **Extension Development Host** window with the extension loaded from the workspace.
+3. In the Extension Development Host window, open a Git repository to test the review workflow. If that repository is already open in another VS Code window, close it there first.
+4. After making code changes, reload the Extension Development Host window with `Cmd+Shift+P` → **Developer: Reload Window**.
 
-This works because VS Code loads the extension directly from the `out/` folder in the workspace.
+This works because VS Code loads the extension directly from the workspace's `out/` folder.
 
 ### Full Package Install
 
