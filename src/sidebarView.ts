@@ -371,4 +371,3 @@ function validateNonces(html: string): void {
     );
   }
 }
-
