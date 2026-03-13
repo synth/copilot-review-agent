@@ -331,7 +331,7 @@ async function executeGetFileOutline(input: ToolCallInput, workspacePath: string
   try {
     content = await fs.promises.readFile(resolved, "utf-8");
   } catch (err) {
-    return `Error reading file "${absPath}": ${err instanceof Error ? err.message : String(err)}`;
+    return `Error reading file "${resolved}": ${err instanceof Error ? err.message : String(err)}`;
   }
 
   const lines = content.split('\n');
