@@ -12,6 +12,10 @@ const DEFAULT_CONFIG: CopilotReviewAgentConfig = {
   categories: ['security', 'performance', 'correctness', 'maintainability', 'testing', 'style'],
   customInstructions: '',
   maxFindings: 50,
+  maxToolCallsPerAgent: 10,
+  subagents: true,
+  enabledSubagents: [],
+  parallelSubagents: 4,
 };
 
 const validSeverities: Severity[] = ['blocker', 'high', 'medium', 'low', 'nit'];
@@ -98,6 +102,10 @@ export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
     categories: resolvedCategories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings ?? DEFAULT_CONFIG.maxFindings,
+    maxToolCallsPerAgent: fileConfig.maxToolCallsPerAgent ?? DEFAULT_CONFIG.maxToolCallsPerAgent,
+    subagents: fileConfig.subagents ?? DEFAULT_CONFIG.subagents,
+    enabledSubagents: fileConfig.enabledSubagents ?? DEFAULT_CONFIG.enabledSubagents,
+    parallelSubagents: fileConfig.parallelSubagents ?? DEFAULT_CONFIG.parallelSubagents,
   };
 }
 
@@ -143,9 +151,9 @@ Edit this file to customize how the AI reviews your code.
 ## Project Context
 
 <!-- Describe your project so the AI understands the codebase -->
-- Language / framework: 
-- Architecture patterns: 
-- Key conventions: 
+- Language / framework:
+- Architecture patterns:
+- Key conventions:
 
 ## Review Focus Areas
 
@@ -173,6 +181,10 @@ interface FileConfig {
   categories?: Category[];
   customInstructions?: string;
   maxFindings?: number;
+  maxToolCallsPerAgent?: number;
+  subagents?: boolean;
+  enabledSubagents?: string[];
+  parallelSubagents?: number;
 }
 
 async function loadYamlConfig(): Promise<FileConfig> {

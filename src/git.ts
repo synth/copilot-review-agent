@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { execSync } from 'child_process';
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import { DiffFile, DiffHunk, BranchSelection } from './types';
 import { minimatch } from './minimatch';
@@ -72,6 +73,7 @@ export class GitDiffEngine {
 
   /**
    * Get the unified diff between the merge base and the target.
+   * Uses a temp file to avoid ENOBUFS on large diffs.
    * @param selection Branch selection with base/target/mergeBase
    * @param filePaths Optional: limit to specific files
    */
@@ -96,7 +98,23 @@ export class GitDiffEngine {
       diffCmd += ` -- ${filePaths.join(' ')}`;
     }
 
-    return this.git(diffCmd);
+    // Write diff to a temp file to avoid ENOBUFS with large diffs.
+    // execSync pipe buffers are limited; redirecting to a file sidesteps this.
+    const tmpFile = path.join(os.tmpdir(), `copilot-review-diff-${process.pid}-${Date.now()}.patch`);
+    try {
+      execSync(`git ${diffCmd} > "${tmpFile}"`, {
+        cwd: this.cwd,
+        encoding: 'utf-8',
+        // stdout goes to the file, only stderr uses the pipe buffer
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return fs.readFileSync(tmpFile, 'utf-8').trim();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`git diff failed: ${msg}`);
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch { /* ignore cleanup errors */ }
+    }
   }
 
   /**

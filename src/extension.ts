@@ -932,6 +932,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Reset module-level state for this review session to ensure warnings fire correctly
     resetWarnings();
 
+    // Set workspace path so the reviewer can use tools for cross-file analysis
+    reviewer.setWorkspace(wsFolder.uri.fsPath);
+
     if (activeTokenSource) {
       activeTokenSource.cancel();
       // Let the previous runReview's finally block handle dispose
@@ -1138,6 +1141,57 @@ export function activate(context: vscode.ExtensionContext) {
         sidebar.setReviewState('idle');
         reviewInProgress = false;
         return;
+      }
+
+      // ────────────────────────────────
+      // Task: Tier 2 specialist subagents
+      // ────────────────────────────────
+      if (config.subagents && !wasCancelled) {
+        const subagentTaskId = nextTaskId();
+        sidebar.addTask({
+          id: subagentTaskId,
+          label: 'Running specialist subagents',
+          status: 'running',
+          collapsible: true,
+        });
+        legacyStep('Running specialist subagents', 'running');
+
+        try {
+          const tier2Findings = await reviewer.runSubagents(
+            diffFiles,
+            config,
+            token,
+            (agent) => {
+              const agentSubId = nextSubId();
+              sidebar.addSubStep({
+                taskId: subagentTaskId, id: agentSubId,
+                label: agent.label,
+                status: 'running',
+              });
+            },
+            (agent, findings) => {
+              // Find the running sub-step for this agent and mark it done
+              const detail = `${findings.length} finding${findings.length !== 1 ? 's' : ''}`;
+              legacyStep(agent.label, 'done', detail);
+            },
+            (toolName, _input) => {
+              legacyStep(`Tool: ${toolName}`, 'done');
+            }
+          );
+
+          allFindings.push(...tier2Findings);
+
+          sidebar.updateTask({
+            id: subagentTaskId,
+            status: 'done',
+            detail: `${tier2Findings.length} finding${tier2Findings.length !== 1 ? 's' : ''} from specialists`,
+          });
+          legacyStep('Running specialist subagents', 'done', `${tier2Findings.length} finding${tier2Findings.length !== 1 ? 's' : ''}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          sidebar.updateTask({ id: subagentTaskId, status: 'error', detail: msg });
+          legacyStep('Running specialist subagents', 'error', msg);
+        }
       }
 
       // ────────────────────────────────

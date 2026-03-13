@@ -44,6 +44,12 @@ export function buildFileContext(file: DiffFile, config: CopilotReviewAgentConfi
   const parts: string[] = [];
   parts.push(`## File: ${file.path}${file.isNew ? ' (new)' : ''}${file.isDeleted ? ' (deleted)' : ''}`);
 
+  // Summarize new symbols introduced by this diff to help catch unused additions
+  const newSymbols = extractNewSymbols(file);
+  if (newSymbols.length > 0) {
+    parts.push(`\n**New symbols introduced:** ${newSymbols.join(', ')}`);
+  }
+
   if (file.fullContent && !file.isDeleted) {
     const fileLines = file.fullContent.split('\n');
 
@@ -173,4 +179,31 @@ export function chunkDiffFiles(
  */
 export function buildChunkContext(chunk: DiffChunk, config: CopilotReviewAgentConfig): string {
   return chunk.files.map(f => buildFileContext(f, config)).join('\n\n---\n\n');
+}
+
+/**
+ * Extract names of new symbols (functions, classes, methods) introduced in added lines.
+ * This gives the model a quick checklist of things to verify usage for.
+ */
+function extractNewSymbols(file: DiffFile): string[] {
+  const addedLineNums = new Set(file.hunks.flatMap(h => h.addedLines));
+  if (addedLineNums.size === 0 || !file.fullContent) { return []; }
+
+  const lines = file.fullContent.split('\n');
+  const symbols: string[] = [];
+  const symbolPattern = /(?:(?:export\s+)?(?:function|class|interface|type|enum|const|let|var|def|async\s+function)\s+(\w+))|(?:(?:public|private|protected|static)\s+(?:async\s+)?(\w+)\s*\()/;
+
+  for (const lineNum of addedLineNums) {
+    const line = lines[lineNum - 1];
+    if (!line) { continue; }
+    const match = line.match(symbolPattern);
+    if (match) {
+      const name = match[1] || match[2];
+      if (name && !symbols.includes(name)) {
+        symbols.push(name);
+      }
+    }
+  }
+
+  return symbols;
 }
