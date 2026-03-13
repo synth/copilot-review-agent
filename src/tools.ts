@@ -309,13 +309,24 @@ async function executeGetFileOutline(input: ToolCallInput, workspacePath: string
     return 'Error: path must be within the workspace';
   }
 
+  let stat: Awaited<ReturnType<typeof fs.promises.stat>>;
   try {
-    await fs.promises.access(resolved);
+    stat = await fs.promises.stat(resolved);
   } catch {
     return `Error: file not found: ${relPath}`;
   }
 
-  const content = await fs.promises.readFile(resolved, 'utf-8');
+  if (stat.size > 1_000_000) {
+    return `Error: file too large for outline (${(stat.size / 1024).toFixed(0)} KB). Use read_file_section instead.`;
+  }
+
+  let content: string;
+  try {
+    content = await fs.promises.readFile(resolved, "utf-8");
+  } catch (err) {
+    return `Error reading file "${absPath}": ${err instanceof Error ? err.message : String(err)}`;
+  }
+
   const lines = content.split('\n');
   const outline: string[] = [];
 
