@@ -1191,6 +1191,7 @@ export function activate(context: vscode.ExtensionContext) {
           const msg = err instanceof Error ? err.message : String(err);
           sidebar.updateTask({ id: subagentTaskId, status: 'error', detail: msg });
           legacyStep('Running specialist subagents', 'error', msg);
+          vscode.window.showWarningMessage(`Specialist analysis failed: ${msg}. Review continues with initial findings only.`);
         }
       }
 

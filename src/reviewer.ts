@@ -254,19 +254,25 @@ If there are no findings, respond with: []`;
       let textContent = '';
       const toolCalls: Array<{ callId: string; name: string; input: ToolCallInput }> = [];
 
-      for await (const part of response.stream) {
-        if (token.isCancellationRequested) { return textContent; }
+      try {
+        for await (const part of response.stream) {
+          if (token.isCancellationRequested) { return textContent; }
 
-        if (part instanceof vscode.LanguageModelTextPart) {
-          textContent += part.value;
-          if (onToken) { onToken(part.value); }
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          toolCalls.push({
-            callId: part.callId,
-            name: part.name,
-            input: part.input as ToolCallInput,
-          });
+          if (part instanceof vscode.LanguageModelTextPart) {
+            textContent += part.value;
+            if (onToken) { onToken(part.value); }
+          } else if (part instanceof vscode.LanguageModelToolCallPart) {
+            toolCalls.push({
+              callId: part.callId,
+              name: part.name,
+              input: part.input as ToolCallInput,
+            });
+          }
         }
+      } catch (err: unknown) {
+        if (textContent) { return textContent; }
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Stream error during tool loop iteration ${iteration}: ${msg}`);
       }
 
       // If no tool calls, the model is done — return the text
@@ -321,15 +327,21 @@ If there are no findings, respond with: []`;
     token: vscode.CancellationToken,
     onToken?: (fragment: string) => void
   ): Promise<string> {
-    const response = await this.sendRequestWithRetry(messages, {
-      justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
-    }, token);
-
     let fullText = '';
-    for await (const fragment of response.text) {
-      if (token.isCancellationRequested) { break; }
-      fullText += fragment;
-      if (onToken) { onToken(fragment); }
+    try {
+      const response = await this.sendRequestWithRetry(messages, {
+        justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
+      }, token);
+
+      for await (const fragment of response.text) {
+        if (token.isCancellationRequested) { break; }
+        fullText += fragment;
+        if (onToken) { onToken(fragment); }
+      }
+    } catch (err: unknown) {
+      if (fullText) { return fullText; }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Single-pass LLM call failed (fallback/final pass): ${msg}`);
     }
     return fullText;
   }

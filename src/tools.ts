@@ -188,8 +188,9 @@ async function executeReadFileSection(input: ToolCallInput, workspacePath: strin
   let lineNum = 0;
 
   await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(resolved, { encoding: 'utf-8' });
     const rl = readline.createInterface({
-      input: fs.createReadStream(resolved, { encoding: 'utf-8' }),
+      input: stream,
       crlfDelay: Infinity,
     });
     rl.on('line', (line) => {
@@ -201,8 +202,14 @@ async function executeReadFileSection(input: ToolCallInput, workspacePath: strin
         rl.close();
       }
     });
-    rl.on('close', resolve);
-    rl.on('error', reject);
+    rl.on('close', () => {
+      stream.destroy();
+      resolve();
+    });
+    rl.on('error', (err) => {
+      stream.destroy();
+      reject(err);
+    });
   });
 
   let result = collected.join('\n');

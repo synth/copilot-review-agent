@@ -102,6 +102,8 @@ export class GitDiffEngine {
     // execSync pipe buffers are limited; redirecting to a file sidesteps this.
     const tmpFile = path.join(os.tmpdir(), `copilot-review-diff-${process.pid}-${Date.now()}.patch`);
     try {
+      // Note: This method is synchronous and may block the extension host thread for large diffs.
+      // Consider refactoring to async if non-blocking behavior is required.
       execSync(`git ${diffCmd} > "${tmpFile}"`, {
         cwd: this.cwd,
         encoding: 'utf-8',
