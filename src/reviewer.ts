@@ -285,22 +285,23 @@ If there are no findings, respond with: []`;
       }
       messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
 
-      // Execute each tool call and build result messages
-      const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
+      // Execute all tool calls in parallel to avoid blocking the extension host
       for (const tc of toolCalls) {
         if (onToolCall) { onToolCall(tc.name, tc.input); }
-
-        let result: string;
-        try {
-          result = executeTool(tc.name, tc.input, this._workspacePath!);
-        } catch (err: any) {
-          result = `Tool error: ${err.message}`;
-        }
-
-        toolResultParts.push(
-          new vscode.LanguageModelToolResultPart(tc.callId, [new vscode.LanguageModelTextPart(result)])
-        );
       }
+
+      const toolResults = await Promise.all(
+        toolCalls.map(async (tc) => {
+          let result: string;
+          try {
+            result = await executeTool(tc.name, tc.input, this._workspacePath!);
+          } catch (err: any) {
+            result = `Tool error: ${err.message}`;
+          }
+          return new vscode.LanguageModelToolResultPart(tc.callId, [new vscode.LanguageModelTextPart(result)]);
+        })
+      );
+      const toolResultParts: vscode.LanguageModelToolResultPart[] = toolResults;
 
       // Add tool results as a User message
       messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));

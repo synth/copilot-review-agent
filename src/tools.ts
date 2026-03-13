@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
+
+const execAsync = promisify(exec);
 
 /** Maximum lines returned by a single tool invocation */
 const MAX_RESULT_LINES = 500;
@@ -103,11 +107,11 @@ export interface ToolCallInput {
  * Execute a tool by name and return a text result.
  * All results are truncated to MAX_RESULT_LINES to stay within token budgets.
  */
-export function executeTool(
+export async function executeTool(
   toolName: string,
   input: ToolCallInput,
   workspacePath: string
-): string {
+): Promise<string> {
   switch (toolName) {
     case 'search_codebase':
       return executeSearchCodebase(input, workspacePath);
@@ -122,46 +126,29 @@ export function executeTool(
   }
 }
 
-function gitGrep(pattern: string, workspacePath: string, extraArgs: string = ''): string {
-  try {
-    // Use -I to skip binary files, --no-color for clean output
-    const cmd = `git grep -n -I --no-color ${extraArgs} -- ${escapeShellArg(pattern)}`;
-    return execSync(cmd, {
-      cwd: workspacePath,
-      encoding: 'utf-8',
-      maxBuffer: 5 * 1024 * 1024,
-    }).trim();
-  } catch (err: any) {
-    // git grep returns exit code 1 when no matches found — that's not an error
-    if (err.status === 1) { return ''; }
-    throw err;
-  }
-}
-
 function escapeShellArg(arg: string): string {
   // Wrap in single quotes, escape any embedded single quotes
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
-function executeSearchCodebase(input: ToolCallInput, workspacePath: string): string {
+async function executeSearchCodebase(input: ToolCallInput, workspacePath: string): Promise<string> {
   const pattern = String(input.pattern || '');
   if (!pattern) { return 'Error: pattern is required'; }
 
   const fileGlob = input.fileGlob ? String(input.fileGlob) : undefined;
-  const extraArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
 
   // Use git grep with line numbers
   let raw: string;
   try {
     const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
     const cmd = `git grep -n -I --no-color -- ${escapeShellArg(pattern)} ${globArgs}`;
-    raw = execSync(cmd, {
+    const { stdout } = await execAsync(cmd, {
       cwd: workspacePath,
-      encoding: 'utf-8',
       maxBuffer: 5 * 1024 * 1024,
-    }).trim();
+    });
+    raw = stdout.trim();
   } catch (err: any) {
-    if (err.status === 1) { return 'No matches found.'; }
+    if (err.code === 1) { return 'No matches found.'; }
     return `Search error: ${err.message}`;
   }
 
@@ -177,7 +164,7 @@ function executeSearchCodebase(input: ToolCallInput, workspacePath: string): str
   return result;
 }
 
-function executeReadFileSection(input: ToolCallInput, workspacePath: string): string {
+async function executeReadFileSection(input: ToolCallInput, workspacePath: string): Promise<string> {
   const relPath = String(input.path || '');
   if (!relPath) { return 'Error: path is required'; }
 
@@ -187,7 +174,9 @@ function executeReadFileSection(input: ToolCallInput, workspacePath: string): st
     return 'Error: path must be within the workspace';
   }
 
-  if (!fs.existsSync(resolved)) {
+  try {
+    await fs.promises.access(resolved);
+  } catch {
     return `Error: file not found: ${relPath}`;
   }
 
@@ -195,69 +184,79 @@ function executeReadFileSection(input: ToolCallInput, workspacePath: string): st
   const endLine = Number(input.endLine) || startLine + 200;
   const clampedEnd = Math.min(endLine, startLine + MAX_RESULT_LINES - 1);
 
-  const content = fs.readFileSync(resolved, 'utf-8');
-  const allLines = content.split('\n');
-  const slice = allLines.slice(startLine - 1, clampedEnd);
+  const collected: string[] = [];
+  let lineNum = 0;
 
-  const numbered = slice.map((line, idx) => `${String(startLine + idx).padStart(5)} | ${line}`);
-  let result = numbered.join('\n');
+  await new Promise<void>((resolve, reject) => {
+    const rl = readline.createInterface({
+      input: fs.createReadStream(resolved, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
+    rl.on('line', (line) => {
+      lineNum++;
+      if (lineNum >= startLine && lineNum <= clampedEnd) {
+        collected.push(`${String(lineNum).padStart(5)} | ${line}`);
+      }
+      if (lineNum >= clampedEnd) {
+        rl.close();
+      }
+    });
+    rl.on('close', resolve);
+    rl.on('error', reject);
+  });
+
+  let result = collected.join('\n');
   if (clampedEnd < endLine) {
     result += `\n\n... (truncated at ${MAX_RESULT_LINES} lines)`;
   }
   return result;
 }
 
-function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: string): string {
+async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: string): Promise<string> {
   const symbol = String(input.symbol || '');
   if (!symbol) { return 'Error: symbol is required'; }
 
   const fileGlob = input.fileGlob ? String(input.fileGlob) : undefined;
 
-  // Use git grep -c to count occurrences per file
+  // Use a single git grep -n call to get line locations, then derive per-file counts
   let raw: string;
   try {
     const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
-    const cmd = `git grep -c -I --no-color -- ${escapeShellArg(symbol)} ${globArgs}`;
-    raw = execSync(cmd, {
+    const cmd = `git grep -n -I --no-color -- ${escapeShellArg(symbol)} ${globArgs}`;
+    const { stdout } = await execAsync(cmd, {
       cwd: workspacePath,
-      encoding: 'utf-8',
       maxBuffer: 5 * 1024 * 1024,
-    }).trim();
+    });
+    raw = stdout.trim();
   } catch (err: any) {
-    if (err.status === 1) { return `Symbol "${symbol}": 0 references found.`; }
+    if (err.code === 1) { return `Symbol "${symbol}": 0 references found.`; }
     return `Search error: ${err.message}`;
   }
 
   if (!raw) { return `Symbol "${symbol}": 0 references found.`; }
 
-  const fileLines = raw.split('\n').filter(Boolean);
-  let totalCount = 0;
-  const fileCounts: Array<{ file: string; count: number }> = [];
+  const allLines = raw.split('\n').filter(Boolean);
 
-  for (const line of fileLines) {
-    const match = line.match(/^(.+):(\d+)$/);
+  // Derive per-file counts by grouping results
+  const countMap = new Map<string, number>();
+  for (const line of allLines) {
+    const match = line.match(/^(.+?):\d+:/);
     if (match) {
-      const count = parseInt(match[2], 10);
-      totalCount += count;
-      fileCounts.push({ file: match[1], count });
+      countMap.set(match[1], (countMap.get(match[1]) || 0) + 1);
     }
   }
 
-  // Also get a few sample lines with context
-  let sampleLines = '';
-  try {
-    const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
-    const cmd = `git grep -n -I --no-color -- ${escapeShellArg(symbol)} ${globArgs}`;
-    const sampleRaw = execSync(cmd, {
-      cwd: workspacePath,
-      encoding: 'utf-8',
-      maxBuffer: 5 * 1024 * 1024,
-    }).trim();
-    const lines = sampleRaw.split('\n').slice(0, 10);
-    sampleLines = '\n\nSample locations:\n' + lines.join('\n');
-  } catch {
-    // ignore
+  let totalCount = 0;
+  const fileCounts: Array<{ file: string; count: number }> = [];
+  for (const [file, count] of countMap) {
+    totalCount += count;
+    fileCounts.push({ file, count });
   }
+
+  // Extract first 10 lines as sample locations from the same result set
+  const sampleLines = allLines.length > 0
+    ? '\n\nSample locations:\n' + allLines.slice(0, 10).join('\n')
+    : '';
 
   const summary = `Symbol "${symbol}": ${totalCount} reference${totalCount !== 1 ? 's' : ''} across ${fileCounts.length} file${fileCounts.length !== 1 ? 's' : ''}.`;
   const breakdown = fileCounts
@@ -269,7 +268,39 @@ function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: string): s
   return `${summary}\n\n${breakdown}${sampleLines}`;
 }
 
-function executeGetFileOutline(input: ToolCallInput, workspacePath: string): string {
+// Pre-compiled outline patterns with keyword pre-filters.
+// Tested in order; first match wins.
+interface OutlinePattern {
+  regex: RegExp;
+  label: string;
+  /** Trimmed line must start with one of these before regex is tested. */
+  prefixes: string[];
+}
+
+const OUTLINE_PATTERNS: readonly OutlinePattern[] = [
+  // Imports
+  { regex: /^\s*(import\s|from\s|require\s*\(|const\s+\w+\s*=\s*require)/, label: 'import', prefixes: ['import ', 'from ', 'require', 'const '] },
+  // Exports
+  { regex: /^\s*export\s+(default\s+)?(class|function|const|let|var|interface|type|enum|abstract)/, label: 'export', prefixes: ['export '] },
+  { regex: /^\s*module\.exports/, label: 'export', prefixes: ['module'] },
+  // Class / interface / enum
+  { regex: /^\s*(export\s+)?(abstract\s+)?class\s+\w+/, label: 'class', prefixes: ['export ', 'abstract ', 'class '] },
+  { regex: /^\s*(export\s+)?interface\s+\w+/, label: 'interface', prefixes: ['export ', 'interface '] },
+  { regex: /^\s*(export\s+)?enum\s+\w+/, label: 'enum', prefixes: ['export ', 'enum '] },
+  // Functions
+  { regex: /^\s*(export\s+)?(async\s+)?function\s+\w+/, label: 'function', prefixes: ['export ', 'async ', 'function '] },
+  { regex: /^\s*(export\s+)?(const|let|var)\s+\w+\s*=\s*(async\s+)?\(/, label: 'function', prefixes: ['export ', 'const ', 'let ', 'var '] },
+  // Class methods (JS/TS)
+  { regex: /^\s*(public|private|protected|static|async|get|set|\*)\s+\w+\s*[\(<]/, label: 'method', prefixes: ['public ', 'private ', 'protected ', 'static ', 'async ', 'get ', 'set ', '*'] },
+  // Python def
+  { regex: /^\s*(async\s+)?def\s+\w+/, label: 'function', prefixes: ['async ', 'def '] },
+  // Ruby / Python class / module
+  { regex: /^\s*(class|module)\s+[A-Z]\w*/, label: 'class', prefixes: ['class ', 'module '] },
+  // Go func
+  { regex: /^func\s+(\(\w+\s+\*?\w+\)\s+)?\w+/, label: 'function', prefixes: ['func '] },
+];
+
+async function executeGetFileOutline(input: ToolCallInput, workspacePath: string): Promise<string> {
   const relPath = String(input.path || '');
   if (!relPath) { return 'Error: path is required'; }
 
@@ -278,92 +309,26 @@ function executeGetFileOutline(input: ToolCallInput, workspacePath: string): str
     return 'Error: path must be within the workspace';
   }
 
-  if (!fs.existsSync(resolved)) {
+  try {
+    await fs.promises.access(resolved);
+  } catch {
     return `Error: file not found: ${relPath}`;
   }
 
-  const content = fs.readFileSync(resolved, 'utf-8');
+  const content = await fs.promises.readFile(resolved, 'utf-8');
   const lines = content.split('\n');
   const outline: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineNum = i + 1;
+    const trimmed = line.trimStart();
 
-    // Imports
-    if (/^\s*(import\s|from\s|require\s*\(|const\s+\w+\s*=\s*require)/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [import] ${line.trim()}`);
-      continue;
-    }
-
-    // Exports
-    if (/^\s*export\s+(default\s+)?(class|function|const|let|var|interface|type|enum|abstract)/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [export] ${line.trim()}`);
-      continue;
-    }
-    if (/^\s*module\.exports/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [export] ${line.trim()}`);
-      continue;
-    }
-
-    // Class / interface / enum definitions
-    if (/^\s*(export\s+)?(abstract\s+)?class\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [class] ${line.trim()}`);
-      continue;
-    }
-    if (/^\s*(export\s+)?interface\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [interface] ${line.trim()}`);
-      continue;
-    }
-    if (/^\s*(export\s+)?enum\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [enum] ${line.trim()}`);
-      continue;
-    }
-
-    // Function / method definitions (JS/TS, Python, Ruby, Go, Java, C#)
-    if (/^\s*(export\s+)?(async\s+)?function\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [function] ${line.trim()}`);
-      continue;
-    }
-    // Arrow functions assigned to const/let
-    if (/^\s*(export\s+)?(const|let|var)\s+\w+\s*=\s*(async\s+)?\(/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [function] ${line.trim()}`);
-      continue;
-    }
-    // Class methods (JS/TS): includes async, static, private, public, protected, get, set
-    if (/^\s*(public|private|protected|static|async|get|set|\*)\s+\w+\s*[\(<]/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [method] ${line.trim()}`);
-      continue;
-    }
-    // Shorthand method in class body: methodName( or methodName<
-    if (/^\s+\w+\s*[\(<]/.test(line) && /[{,]\s*$/.test(lines[i - 1] || '')) {
-      // Skip — too noisy
-    }
-
-    // Python: def / class
-    if (/^\s*(async\s+)?def\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [function] ${line.trim()}`);
-      continue;
-    }
-    if (/^\s*class\s+\w+/.test(line) && !outline[outline.length - 1]?.includes(line.trim())) {
-      outline.push(`${String(lineNum).padStart(5)} | [class] ${line.trim()}`);
-      continue;
-    }
-
-    // Ruby: def / class / module
-    if (/^\s*def\s+\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [method] ${line.trim()}`);
-      continue;
-    }
-    if (/^\s*(class|module)\s+[A-Z]\w*/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [class] ${line.trim()}`);
-      continue;
-    }
-
-    // Go: func
-    if (/^func\s+(\(\w+\s+\*?\w+\)\s+)?\w+/.test(line)) {
-      outline.push(`${String(lineNum).padStart(5)} | [function] ${line.trim()}`);
-      continue;
+    for (const { regex, label, prefixes } of OUTLINE_PATTERNS) {
+      if (prefixes.some(p => trimmed.startsWith(p)) && regex.test(line)) {
+        outline.push(`${String(lineNum).padStart(5)} | [${label}] ${line.trim()}`);
+        break;
+      }
     }
   }
 

@@ -44,14 +44,15 @@ export function buildFileContext(file: DiffFile, config: CopilotReviewAgentConfi
   const parts: string[] = [];
   parts.push(`## File: ${file.path}${file.isNew ? ' (new)' : ''}${file.isDeleted ? ' (deleted)' : ''}`);
 
+  const fileLines = file.fullContent ? file.fullContent.split('\n') : undefined;
+
   // Summarize new symbols introduced by this diff to help catch unused additions
-  const newSymbols = extractNewSymbols(file);
+  const newSymbols = extractNewSymbols(file, fileLines);
   if (newSymbols.length > 0) {
     parts.push(`\n**New symbols introduced:** ${newSymbols.join(', ')}`);
   }
 
-  if (file.fullContent && !file.isDeleted) {
-    const fileLines = file.fullContent.split('\n');
+  if (fileLines && !file.isDeleted) {
 
     // Compute the context window [start, end) for each hunk (0-indexed line positions).
     const hunkWindows = file.hunks.map(hunk => ({
@@ -185,11 +186,11 @@ export function buildChunkContext(chunk: DiffChunk, config: CopilotReviewAgentCo
  * Extract names of new symbols (functions, classes, methods) introduced in added lines.
  * This gives the model a quick checklist of things to verify usage for.
  */
-function extractNewSymbols(file: DiffFile): string[] {
+function extractNewSymbols(file: DiffFile, fileLines?: string[]): string[] {
   const addedLineNums = new Set(file.hunks.flatMap(h => h.addedLines));
-  if (addedLineNums.size === 0 || !file.fullContent) { return []; }
+  if (addedLineNums.size === 0 || !fileLines) { return []; }
 
-  const lines = file.fullContent.split('\n');
+  const lines = fileLines;
   const symbols: string[] = [];
   const symbolPattern = /(?:(?:export\s+)?(?:function|class|interface|type|enum|const|let|var|def|async\s+function)\s+(\w+))|(?:(?:public|private|protected|static)\s+(?:async\s+)?(\w+)\s*\()/;
 
