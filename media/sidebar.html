@@ -39,7 +39,16 @@ select {
 }
 select:focus { border-color: var(--vscode-focusBorder); }
 .native-select {
-  display: none;
+  /* Visually hidden but accessible to assistive technologies */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 button {
   width: 100%; padding: 6px 14px; font-size: 13px;
@@ -1277,11 +1286,19 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
         }
       }
 
+      const optionId = 'picker-option-' + index;
+      const isSelected = entry.value === state.select.value;
       const option = el('button', {
         cls: 'picker-option',
-        attrs: { type: 'button', role: 'option', 'data-value': entry.value },
+        attrs: {
+          type: 'button',
+          role: 'option',
+          id: optionId,
+          'data-value': entry.value,
+          'aria-selected': isSelected ? 'true' : 'false',
+        },
       });
-      if (entry.value === state.select.value) {
+      if (isSelected) {
         option.classList.add('selected');
       }
 
@@ -1294,18 +1311,23 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
       option.appendChild(main);
       option.appendChild(el('span', { cls: 'picker-option-check', text: '✓' }));
       option.addEventListener('click', () => selectPickerValue(state, entry.value));
-      option.addEventListener('mousemove', () => setActiveOption(state, index));
+      option.addEventListener('mousemove', () => {
+        setActiveOption(state, index);
+        state.optionsEl.setAttribute('aria-activedescendant', optionId);
+      });
       state.optionsEl.appendChild(option);
     });
 
     if (filtered.length === 0) {
       state.activeIndex = -1;
+      state.optionsEl.removeAttribute('aria-activedescendant');
       return;
     }
 
     const selectedIndex = filtered.findIndex(entry => entry.value === state.select.value);
     const nextIndex = selectedIndex >= 0 ? selectedIndex : 0;
     setActiveOption(state, nextIndex);
+    state.optionsEl.setAttribute('aria-activedescendant', 'picker-option-' + nextIndex);
   }
 
   function moveActiveOption(state, delta) {

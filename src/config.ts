@@ -77,19 +77,18 @@ export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
     vscode.window.showWarningMessage(`Copilot Review Agent: Invalid severityThreshold "${userSeverity}". Using default.`);
   }
 
-  // Read and validate additional YAML keys that may not be mapped to camelCase
-  // properties by loadYamlConfig(). We access them via `as any` to avoid changing
-  // the declared type of fileConfig.
-  const rawYamlConfig = fileConfig as any;
+  // Validate YAML-derived maxToolCallsPerAgent explicitly; loadYamlConfig()
+  // already normalizes keys from snake_case to camelCase.
+  const yamlMaxToolCallsPerAgentRaw = (fileConfig as any).maxToolCallsPerAgent;
 
   let yamlMaxToolCallsPerAgent: number | undefined;
-  if (rawYamlConfig?.max_tool_calls_per_agent !== undefined) {
-    const v = rawYamlConfig.max_tool_calls_per_agent;
+  if (yamlMaxToolCallsPerAgentRaw !== undefined) {
+    const v = yamlMaxToolCallsPerAgentRaw;
     if (typeof v === 'number' && Number.isInteger(v) && v > 0) {
       yamlMaxToolCallsPerAgent = v;
     } else {
       void vscode.window.showWarningMessage(
-        'Copilot Review Agent: Invalid `max_tool_calls_per_agent` in .copilot-review-agent.yml. It must be a positive integer. Using default.'
+        'Copilot Review Agent: Invalid `maxToolCallsPerAgent` in .copilot-review-agent.yml. It must be a positive integer. Using default.'
       );
     }
   }
