@@ -39,15 +39,7 @@ select {
 }
 select:focus { border-color: var(--vscode-focusBorder); }
 .native-select {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  display: none;
 }
 button {
   width: 100%; padding: 6px 14px; font-size: 13px;
@@ -474,10 +466,10 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
     <div class="section">
       <h3>Branch Selection</h3>
       <label id="base-branch-label">Base branch</label>
-      <select id="base-branch" class="native-select" aria-labelledby="base-branch-label"><option value="">Loading branches…</option></select>
+      <select id="base-branch" class="native-select" aria-labelledby="base-branch-label" tabindex="-1" aria-hidden="true"><option value="">Loading branches…</option></select>
       <div id="base-picker" class="branch-picker" aria-labelledby="base-branch-label"></div>
       <label id="target-branch-label">Target</label>
-      <select id="target-branch" class="native-select" aria-labelledby="target-branch-label"><option value="">Loading branches…</option></select>
+      <select id="target-branch" class="native-select" aria-labelledby="target-branch-label" tabindex="-1" aria-hidden="true"><option value="">Loading branches…</option></select>
       <div id="target-picker" class="branch-picker" aria-labelledby="target-branch-label"></div>
       <div id="branch-summary" class="branch-display hidden">
         <span class="branch-tag" id="base-tag">—</span>
