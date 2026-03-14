@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DiffChunk, DiffFile, ReviewFinding, CopilotReviewAgentConfig, Severity, Category, nextFindingId, severityRank } from './types';
 import { buildChunkContext } from './chunker';
 import { REVIEW_TOOLS, executeTool, ToolCallInput } from './tools';
-import { SubagentDefinition, getActiveSubagents, buildSubagentContext } from './subagents';
+import { SubagentDefinition, ActiveSubagent, getActiveSubagents, buildSubagentContext } from './subagents';
 
 /**
  * AI-powered code review engine using the VS Code Language Model API.
@@ -545,24 +545,24 @@ ${truncatedContent}
     onSubagentDone?: (agent: SubagentDefinition, findings: ReviewFinding[]) => void,
     onToolCall?: ToolCallReporter
   ): Promise<ReviewFinding[]> {
-    const agents = getActiveSubagents(config, files);
-    if (agents.length === 0) { return []; }
+    const activeSubagents = getActiveSubagents(config, files);
+    if (activeSubagents.length === 0) { return []; }
 
     const parallelLimit = Math.max(1, config.parallelSubagents ?? 1);
     const allFindings: ReviewFinding[] = [];
 
     // Run subagents in batches of parallelLimit
-    for (let i = 0; i < agents.length; i += parallelLimit) {
+    for (let i = 0; i < activeSubagents.length; i += parallelLimit) {
       if (token.isCancellationRequested) { break; }
 
-      const batch = agents.slice(i, i + parallelLimit);
+      const batch = activeSubagents.slice(i, i + parallelLimit);
       const batchResults = await Promise.all(
-        batch.map(agent => this.runSingleSubagent(agent, files, config, token, onSubagentStart, onToolCall))
+        batch.map(({ agent, relevantFiles }) => this.runSingleSubagent(agent, relevantFiles, config, token, onSubagentStart, onToolCall))
       );
 
       for (let j = 0; j < batch.length; j++) {
         const findings = batchResults[j];
-        if (onSubagentDone) { onSubagentDone(batch[j], findings); }
+        if (onSubagentDone) { onSubagentDone(batch[j].agent, findings); }
         allFindings.push(...findings);
       }
     }
@@ -575,7 +575,7 @@ ${truncatedContent}
    */
   private async runSingleSubagent(
     agent: SubagentDefinition,
-    files: DiffFile[],
+    relevantFiles: DiffFile[],
     config: CopilotReviewAgentConfig,
     token: vscode.CancellationToken,
     onSubagentStart?: (agent: SubagentDefinition) => void,
@@ -584,7 +584,7 @@ ${truncatedContent}
     if (onSubagentStart) { onSubagentStart(agent); }
 
     const systemPrompt = agent.buildPrompt(config);
-    const context = buildSubagentContext(agent, files, config);
+    const context = buildSubagentContext(relevantFiles, config);
 
     const messages = [
       vscode.LanguageModelChatMessage.User(systemPrompt),

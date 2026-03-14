@@ -257,14 +257,20 @@ If there are no findings, respond with: []`;
   },
 ];
 
+export interface ActiveSubagent {
+  agent: SubagentDefinition;
+  relevantFiles: DiffFile[];
+}
+
 /**
  * Get subagents to run based on config and the diff files.
  * Filters by enabled list and file relevance.
+ * Returns each agent paired with its pre-filtered relevant files.
  */
 export function getActiveSubagents(
   config: CopilotReviewAgentConfig,
   files: DiffFile[]
-): SubagentDefinition[] {
+): ActiveSubagent[] {
   let agents = SUBAGENTS;
 
   // Filter by enabled list if specified
@@ -276,21 +282,19 @@ export function getActiveSubagents(
   const enabledCategories = new Set(config.categories);
   agents = agents.filter(a => enabledCategories.has(a.category));
 
-  // Filter by file relevance — keep only subagents that have at least one relevant file
-  agents = agents.filter(a => files.some(f => a.isRelevant(f)));
-
-  return agents;
+  // Compute relevant files once per agent and keep only agents with at least one
+  return agents
+    .map(agent => ({ agent, relevantFiles: files.filter(f => agent.isRelevant(f)) }))
+    .filter(entry => entry.relevantFiles.length > 0);
 }
 
 /**
  * Build the user message for a subagent, including only the relevant files.
  */
 export function buildSubagentContext(
-  agent: SubagentDefinition,
-  files: DiffFile[],
+  relevantFiles: DiffFile[],
   config: CopilotReviewAgentConfig
 ): string {
-  const relevantFiles = files.filter(f => agent.isRelevant(f));
   // Re-use the buildFileContext from chunker via a lightweight import-free version
   // We import buildChunkContext which handles the file → context string conversion
   const parts = relevantFiles.map(f => {

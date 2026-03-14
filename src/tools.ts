@@ -10,6 +10,24 @@ const MAX_RESULT_LINES = 500;
 /** Maximum matches returned by search_codebase */
 const MAX_SEARCH_MATCHES = 50;
 
+const symbolKindLabel: Record<number, string> = {
+  [vscode.SymbolKind.File]: 'file',
+  [vscode.SymbolKind.Module]: 'module',
+  [vscode.SymbolKind.Namespace]: 'namespace',
+  [vscode.SymbolKind.Package]: 'package',
+  [vscode.SymbolKind.Class]: 'class',
+  [vscode.SymbolKind.Method]: 'method',
+  [vscode.SymbolKind.Property]: 'property',
+  [vscode.SymbolKind.Field]: 'field',
+  [vscode.SymbolKind.Constructor]: 'constructor',
+  [vscode.SymbolKind.Enum]: 'enum',
+  [vscode.SymbolKind.Interface]: 'interface',
+  [vscode.SymbolKind.Function]: 'function',
+  [vscode.SymbolKind.Variable]: 'variable',
+  [vscode.SymbolKind.Constant]: 'constant',
+  [vscode.SymbolKind.TypeParameter]: 'type-param',
+};
+
 // ──────────────────────────────────────────────
 // Tool schemas (LanguageModelChatTool format)
 // ──────────────────────────────────────────────
@@ -223,21 +241,28 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
   if (lspResult) { return lspResult; }
 
   // Fallback: use git grep with execFile (argv array, no shell)
+  // Run count and sample queries in parallel
   const countArgs = ['grep', '-w', '-c', '-I', '--no-color', '-e', symbol];
   if (fileGlob) { countArgs.push('--', fileGlob); }
 
-  let countRaw: string;
-  try {
-    const { stdout } = await execFileAsync('git', countArgs, {
-      cwd: workspacePath,
-      maxBuffer: 1024 * 1024,
-    });
-    countRaw = stdout.trim();
-  } catch (err: any) {
-    if (err.code === 1) { return `Symbol "${symbol}": 0 references found.`; }
-    return `Search error: ${err.message}`;
+  const sampleArgs = ['grep', '-w', '-n', '-I', '--no-color', '-m', '10', '-e', symbol];
+  if (fileGlob) { sampleArgs.push('--', fileGlob); }
+
+  const [countResult, sampleResult] = await Promise.all([
+    execFileAsync('git', countArgs, { cwd: workspacePath, maxBuffer: 1024 * 1024 })
+      .then(({ stdout }) => ({ ok: true as const, stdout: stdout.trim() }))
+      .catch((err: any) => ({ ok: false as const, code: err.code, message: err.message })),
+    execFileAsync('git', sampleArgs, { cwd: workspacePath, maxBuffer: 512 * 1024 })
+      .then(({ stdout }) => ({ ok: true as const, stdout: stdout.trim() }))
+      .catch(() => ({ ok: true as const, stdout: '' })),
+  ]);
+
+  if (!countResult.ok) {
+    if (countResult.code === 1) { return `Symbol "${symbol}": 0 references found.`; }
+    return `Search error: ${countResult.message}`;
   }
 
+  const countRaw = countResult.stdout;
   if (!countRaw) { return `Symbol "${symbol}": 0 references found.`; }
 
   let totalCount = 0;
@@ -251,21 +276,9 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
     }
   }
 
-  // Fetch sample locations
   let sampleLines = '';
-  try {
-    const sampleArgs = ['grep', '-w', '-n', '-I', '--no-color', '-m', '10', '-e', symbol];
-    if (fileGlob) { sampleArgs.push('--', fileGlob); }
-    const { stdout } = await execFileAsync('git', sampleArgs, {
-      cwd: workspacePath,
-      maxBuffer: 512 * 1024,
-    });
-    const sampleRaw = stdout.trim();
-    if (sampleRaw) {
-      sampleLines = '\n\nSample locations:\n' + sampleRaw.split('\n').slice(0, 10).join('\n');
-    }
-  } catch {
-    // Non-critical; proceed without samples
+  if (sampleResult.stdout) {
+    sampleLines = '\n\nSample locations:\n' + sampleResult.stdout.split('\n').slice(0, 10).join('\n');
   }
 
   const summary = `Symbol "${symbol}": ${totalCount} reference${totalCount !== 1 ? 's' : ''} across ${fileCounts.length} file${fileCounts.length !== 1 ? 's' : ''}.`;
@@ -374,32 +387,12 @@ async function tryLspOutline(fileUri: vscode.Uri, relPath: string): Promise<stri
     if (!symbols || symbols.length === 0) { return undefined; }
 
     const outline: string[] = [];
-    const kindLabel = (kind: vscode.SymbolKind): string => {
-      const map: Record<number, string> = {
-        [vscode.SymbolKind.File]: 'file',
-        [vscode.SymbolKind.Module]: 'module',
-        [vscode.SymbolKind.Namespace]: 'namespace',
-        [vscode.SymbolKind.Package]: 'package',
-        [vscode.SymbolKind.Class]: 'class',
-        [vscode.SymbolKind.Method]: 'method',
-        [vscode.SymbolKind.Property]: 'property',
-        [vscode.SymbolKind.Field]: 'field',
-        [vscode.SymbolKind.Constructor]: 'constructor',
-        [vscode.SymbolKind.Enum]: 'enum',
-        [vscode.SymbolKind.Interface]: 'interface',
-        [vscode.SymbolKind.Function]: 'function',
-        [vscode.SymbolKind.Variable]: 'variable',
-        [vscode.SymbolKind.Constant]: 'constant',
-        [vscode.SymbolKind.TypeParameter]: 'type-param',
-      };
-      return map[kind] || 'symbol';
-    };
 
     const flatten = (syms: vscode.DocumentSymbol[], indent: number) => {
       for (const sym of syms) {
         const lineNum = sym.range.start.line + 1;
         const prefix = '  '.repeat(indent);
-        outline.push(`${String(lineNum).padStart(5)} | ${prefix}[${kindLabel(sym.kind)}] ${sym.name}`);
+        outline.push(`${String(lineNum).padStart(5)} | ${prefix}[${symbolKindLabel[sym.kind] || 'symbol'}] ${sym.name}`);
         if (sym.children && sym.children.length > 0) {
           flatten(sym.children, indent + 1);
         }
