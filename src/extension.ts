@@ -993,26 +993,27 @@ export function activate(context: vscode.ExtensionContext) {
           };
         case 'requesting-model':
           return {
-            label: event.iteration && event.iteration > 1 ? 'Requesting next AI pass' : 'Requesting AI analysis',
+            label: event.iteration && event.iteration > 1 ? 'Continuing AI analysis' : 'Requesting AI analysis',
             detail: event.detail,
           };
         case 'awaiting-first-token':
           return {
             label: 'Waiting for first AI token',
-            detail: event.detail || (event.iteration ? `Iteration ${event.iteration}` : undefined),
+            detail: event.detail || (event.iteration ? `Analysis pass ${event.iteration}` : undefined),
           };
         case 'streaming-response':
           return {
             label: 'Streaming AI analysis',
             detail: event.elapsedMs != null
-              ? `First token in ${formatDuration(event.elapsedMs)}${totalToolCalls > 0 ? ` • ${totalToolCalls} tool call${totalToolCalls !== 1 ? 's' : ''}` : ''}`
+              ? `First token in ${formatDuration(event.elapsedMs)}${totalToolCalls > 0 ? ` • ${totalToolCalls} verification check${totalToolCalls !== 1 ? 's' : ''}` : ''}`
               : undefined,
           };
         case 'executing-tools':
           return {
-            label: `Running ${event.toolCalls ?? 0} tool check${event.toolCalls === 1 ? '' : 's'}`,
+            label: 'Checking related code and history',
             detail: [
-              event.iteration ? `Iteration ${event.iteration}` : undefined,
+              event.iteration ? `Analysis pass ${event.iteration}` : undefined,
+              event.toolCalls != null ? `${event.toolCalls} verification check${event.toolCalls === 1 ? '' : 's'}` : undefined,
               event.elapsedMs != null ? `model responded in ${formatDuration(event.elapsedMs)}` : undefined,
             ].filter(Boolean).join(' • ') || undefined,
           };
@@ -1183,9 +1184,9 @@ export function activate(context: vscode.ExtensionContext) {
             sidebar.updateSubStep({
               taskId: reviewTaskId,
               id: aiSubId,
-              label: 'Running tool checks',
+              label: 'Checking related code and history',
               status: 'running',
-              detail: `${chunkToolCalls} call${chunkToolCalls !== 1 ? 's' : ''} so far • last: ${toolName}`,
+              detail: `${chunkToolCalls} verification check${chunkToolCalls !== 1 ? 's' : ''} so far`,
             });
             logReview(`Chunk ${i + 1}/${chunks.length}: tool call ${chunkToolCalls} -> ${toolName}`);
           },

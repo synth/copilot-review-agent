@@ -276,7 +276,7 @@ If there are no findings, respond with: []`;
       callbacks?.onProgress?.({
         phase: 'requesting-model',
         iteration: iteration + 1,
-        detail: `Iteration ${iteration + 1}`,
+        detail: `Analysis pass ${iteration + 1}`,
       });
 
       let response: vscode.LanguageModelChatResponse;
