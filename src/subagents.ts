@@ -286,22 +286,3 @@ export function getActiveSubagents(
     .map(agent => ({ agent, relevantFiles: files.filter(f => agent.isRelevant(f)) }))
     .filter(entry => entry.relevantFiles.length > 0);
 }
-
-/**
- * Build the user message for a subagent, including only the relevant files.
- */
-export function buildSubagentContext(
-  relevantFiles: DiffFile[],
-  config: CopilotReviewAgentConfig
-): string {
-  // Re-use the buildFileContext from chunker via a lightweight import-free version
-  // We import buildChunkContext which handles the file → context string conversion
-  const parts = relevantFiles.map(f => {
-    const header = `## File: ${f.path}${f.isNew ? ' (new)' : ''}${f.isDeleted ? ' (deleted)' : ''}`;
-    const hunks = f.hunks.map(h => {
-      return `### Diff hunk at line ${h.newStart}\n\`\`\`diff\n${h.content}\n\`\`\``;
-    }).join('\n\n');
-    return `${header}\n\n${hunks}`;
-  });
-  return parts.join('\n\n---\n\n');
-}
