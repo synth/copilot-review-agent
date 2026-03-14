@@ -13,7 +13,7 @@ const DEFAULT_CONFIG: CopilotReviewAgentConfig = {
   customInstructions: '',
   maxFindings: 50,
   maxToolCallsPerAgent: 10,
-  subagents: true,
+  subagents: false,
   enabledSubagents: [],
   parallelSubagents: 4,
 };

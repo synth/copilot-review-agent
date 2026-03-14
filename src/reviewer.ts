@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { DiffChunk, DiffFile, ReviewFinding, CopilotReviewAgentConfig, Severity, Category, nextFindingId, severityRank } from './types';
-import { buildChunkContext } from './chunker';
+import { buildChunkContext, chunkDiffFiles } from './chunker';
 import { REVIEW_TOOLS, executeTool, ToolCallInput } from './tools';
-import { SubagentDefinition, ActiveSubagent, getActiveSubagents, buildSubagentContext } from './subagents';
+import { SubagentDefinition, getActiveSubagents } from './subagents';
 
 /**
  * AI-powered code review engine using the VS Code Language Model API.
@@ -270,7 +270,6 @@ If there are no findings, respond with: []`;
           }
         }
       } catch (err: unknown) {
-        if (textContent) { return textContent; }
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Stream error during tool loop iteration ${iteration}: ${msg}`);
       }
@@ -339,7 +338,6 @@ If there are no findings, respond with: []`;
         if (onToken) { onToken(fragment); }
       }
     } catch (err: unknown) {
-      if (fullText) { return fullText; }
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Single-pass LLM call failed (fallback/final pass): ${msg}`);
     }
@@ -584,31 +582,40 @@ ${truncatedContent}
     if (onSubagentStart) { onSubagentStart(agent); }
 
     const systemPrompt = agent.buildPrompt(config);
-    const context = buildSubagentContext(relevantFiles, config);
 
-    const messages = [
-      vscode.LanguageModelChatMessage.User(systemPrompt),
-      vscode.LanguageModelChatMessage.Assistant('Understood. I will focus exclusively on my specialty area and use tools to verify findings before reporting.'),
-      vscode.LanguageModelChatMessage.User(`Analyze the following code changes:\n\n${context}`),
-    ];
+    // Chunk the relevant files using the same token budget as Tier 1 reviews
+    // to avoid unbounded prompt sizes on large diffs.
+    const chunks = chunkDiffFiles(relevantFiles, config);
+    const allFindings: ReviewFinding[] = [];
 
-    try {
-      const fullText = await this.sendWithToolLoop(
-        messages, token, config.maxToolCallsPerAgent ?? 10, undefined, onToolCall
-      );
+    for (const chunk of chunks) {
+      if (token.isCancellationRequested) { break; }
 
-      if (token.isCancellationRequested) { return []; }
+      const context = buildChunkContext(chunk, config);
+      const messages = [
+        vscode.LanguageModelChatMessage.User(systemPrompt),
+        vscode.LanguageModelChatMessage.Assistant('Understood. I will focus exclusively on my specialty area and use tools to verify findings before reporting.'),
+        vscode.LanguageModelChatMessage.User(`Analyze the following code changes:\n\n${context}`),
+      ];
 
-      const findings = this.parseFindings(fullText, config);
-      // Tag each finding with the subagent source
-      for (const f of findings) {
-        f.source = agent.id;
+      try {
+        const fullText = await this.sendWithToolLoop(
+          messages, token, config.maxToolCallsPerAgent ?? 10, undefined, onToolCall
+        );
+
+        if (token.isCancellationRequested) { break; }
+
+        const findings = this.parseFindings(fullText, config);
+        for (const f of findings) {
+          f.source = agent.id;
+        }
+        allFindings.push(...findings);
+      } catch (err: any) {
+        // Don't let one chunk failure kill the entire subagent
+        vscode.window.showWarningMessage(`Copilot Review Agent: ${agent.label} failed on chunk: ${err.message}`);
       }
-      return findings;
-    } catch (err: any) {
-      // Don't let one subagent failure kill the entire review
-      vscode.window.showWarningMessage(`Copilot Review Agent: ${agent.label} failed: ${err.message}`);
-      return [];
     }
+
+    return allFindings;
   }
 }

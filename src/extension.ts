@@ -8,6 +8,7 @@ import { GitDiffEngine, pickBaseBranch, pickTargetBranch } from './git';
 import { resetWarnings } from './minimatch';
 import { chunkDiffFiles } from './chunker';
 import { ReviewEngine } from './reviewer';
+import { clearFileCache } from './tools';
 import { CommentManager } from './comments';
 import { TaskListProvider, TaskListItem } from './taskList';
 import { FixActions } from './fixActions';
@@ -1289,6 +1290,7 @@ export function activate(context: vscode.ExtensionContext) {
       activeTokenSource = undefined;
       tokenSource.dispose();
       reviewInProgress = false; // Release mutex
+      clearFileCache();
     }
   }
 }

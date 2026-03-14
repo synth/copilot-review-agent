@@ -1,5 +1,4 @@
-import * as vscode from 'vscode';
-import { DiffFile, ReviewFinding, CopilotReviewAgentConfig, Category } from './types';
+import { DiffFile, CopilotReviewAgentConfig, Category } from './types';
 
 /**
  * A specialist subagent definition for Tier 2 focused analysis.

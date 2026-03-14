@@ -10,6 +10,17 @@ const MAX_RESULT_LINES = 500;
 /** Maximum matches returned by search_codebase */
 const MAX_SEARCH_MATCHES = 50;
 
+/**
+ * Simple per-session file content cache.
+ * Call {@link clearFileCache} between review sessions to release memory.
+ */
+const fileCache = new Map<string, string>();
+
+/** Clear cached file contents (call between review sessions). */
+export function clearFileCache(): void {
+  fileCache.clear();
+}
+
 const symbolKindLabel: Record<number, string> = {
   [vscode.SymbolKind.File]: 'file',
   [vscode.SymbolKind.Module]: 'module',
@@ -204,14 +215,19 @@ async function executeReadFileSection(input: ToolCallInput, workspacePath: strin
     return 'Error: path must be within the workspace';
   }
 
-  let rawBytes: Uint8Array;
-  try {
-    rawBytes = await vscode.workspace.fs.readFile(fileUri);
-  } catch {
-    return `Error: file not found: ${relPath}`;
+  const cacheKey = fileUri.fsPath;
+  let content = fileCache.get(cacheKey);
+  if (content === undefined) {
+    let rawBytes: Uint8Array;
+    try {
+      rawBytes = await vscode.workspace.fs.readFile(fileUri);
+    } catch {
+      return `Error: file not found: ${relPath}`;
+    }
+    content = Buffer.from(rawBytes).toString('utf-8');
+    fileCache.set(cacheKey, content);
   }
 
-  const content = Buffer.from(rawBytes).toString('utf-8');
   const allLines = content.split('\n');
 
   const startLine = Number(input.startLine) || 1;
@@ -236,9 +252,14 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
 
   const fileGlob = input.fileGlob ? String(input.fileGlob) : undefined;
 
-  // Try VS Code reference provider first for semantic accuracy
-  const lspResult = await tryLspReferenceCount(workspacePath, symbol);
-  if (lspResult) { return lspResult; }
+  // Try VS Code reference provider first for semantic accuracy.
+  // Skip the LSP path when a fileGlob filter is provided, because the
+  // reference provider returns workspace-wide results that cannot be
+  // reliably scoped to a glob — fall through to git grep instead.
+  if (!fileGlob) {
+    const lspResult = await tryLspReferenceCount(workspacePath, symbol);
+    if (lspResult) { return lspResult; }
+  }
 
   // Fallback: use git grep with execFile (argv array, no shell)
   // Run count and sample queries in parallel
@@ -299,28 +320,47 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
 async function tryLspReferenceCount(workspacePath: string, symbol: string): Promise<string | undefined> {
   try {
     // Search for files containing the symbol to find a starting position
-    const args = ['grep', '-w', '-n', '-I', '--no-color', '-m', '1', '-e', symbol];
+    const args = ['grep', '-w', '-n', '-I', '--no-color', '-m', '5', '-e', symbol];
     const { stdout } = await execFileAsync('git', args, {
       cwd: workspacePath,
       maxBuffer: 256 * 1024,
     });
-    const firstMatch = stdout.trim().split('\n')[0];
-    if (!firstMatch) { return undefined; }
+    const grepLines = stdout.trim().split('\n').filter(Boolean);
+    if (grepLines.length === 0) { return undefined; }
 
-    const matchParts = firstMatch.match(/^(.+?):(\d+):/);
-    if (!matchParts) { return undefined; }
+    // Try each grep hit: use the document symbol provider to verify the
+    // position corresponds to an actual symbol definition/declaration
+    // rather than a comment, string literal, or shadowed local.
+    let position: vscode.Position | undefined;
+    let fileUri: vscode.Uri | undefined;
 
-    const filePath = matchParts[1];
-    const lineNum = Number(matchParts[2]) - 1;
-    const fileUri = vscode.Uri.file(path.resolve(workspacePath, filePath));
+    for (const grepLine of grepLines) {
+      const matchParts = grepLine.match(/^(.+?):(\d+):/);
+      if (!matchParts) { continue; }
 
-    // Open the document to get the exact column position
-    const doc = await vscode.workspace.openTextDocument(fileUri);
-    const lineText = doc.lineAt(lineNum).text;
-    const col = lineText.indexOf(symbol);
-    if (col < 0) { return undefined; }
+      const filePath = matchParts[1];
+      const lineNum = Number(matchParts[2]) - 1;
+      const candidateUri = vscode.Uri.file(path.resolve(workspacePath, filePath));
 
-    const position = new vscode.Position(lineNum, col);
+      // Ask the language server for document symbols and look for one
+      // whose name matches the requested symbol.
+      const docSymbols: vscode.DocumentSymbol[] | undefined =
+        await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', candidateUri);
+
+      if (docSymbols && docSymbols.length > 0) {
+        const found = findSymbolByName(docSymbols, symbol);
+        if (found) {
+          fileUri = candidateUri;
+          // Use the start of the symbol's selection range — guaranteed to
+          // point at the identifier, so the reference provider resolves
+          // the correct symbol.
+          position = found.selectionRange.start;
+          break;
+        }
+      }
+    }
+
+    if (!position || !fileUri) { return undefined; }
     const locations: vscode.Location[] = await vscode.commands.executeCommand(
       'vscode.executeReferenceProvider',
       fileUri,
@@ -354,6 +394,24 @@ async function tryLspReferenceCount(workspacePath: string, symbol: string): Prom
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Recursively search a document symbol tree for a symbol whose name
+ * matches the given identifier exactly.
+ */
+function findSymbolByName(
+  symbols: vscode.DocumentSymbol[],
+  name: string,
+): vscode.DocumentSymbol | undefined {
+  for (const sym of symbols) {
+    if (sym.name === name) { return sym; }
+    if (sym.children && sym.children.length > 0) {
+      const found = findSymbolByName(sym.children, name);
+      if (found) { return found; }
+    }
+  }
+  return undefined;
 }
 
 async function executeGetFileOutline(input: ToolCallInput, workspacePath: string): Promise<string> {

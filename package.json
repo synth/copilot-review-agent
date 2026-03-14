@@ -299,7 +299,7 @@
     "watch": "tsc -watch -p ./",
     "package": "npm run compile && vsce package --no-dependencies",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx ./node_modules/mocha/bin/mocha.js 'test/**/*.test.ts'"
+    "test": "node --import tsx ./node_modules/mocha/bin/mocha.js \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

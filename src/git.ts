@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { execSync, exec } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import * as os from 'os';
@@ -12,7 +12,7 @@ import { minimatch } from './minimatch';
  * Uses child_process for reliability (the Git Extension API diff methods
  * don't support arbitrary ref comparisons as flexibly).
  */
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export class GitDiffEngine {
   private cwd: string;
@@ -83,40 +83,45 @@ export class GitDiffEngine {
   async getDiff(selection: BranchSelection, filePaths?: string[]): Promise<string> {
     const mergeBase = selection.mergeBase || this.getMergeBase(selection.baseBranch, selection.targetBranch || 'HEAD');
 
-    let diffCmd: string;
+    const args: string[] = ['diff'];
 
     if (!selection.targetBranch || selection.targetBranch === this.getCurrentBranch()) {
       // Target is working tree: include uncommitted changes
       if (selection.includeUncommitted) {
-        diffCmd = `diff ${mergeBase}`;
+        args.push(mergeBase);
       } else {
-        diffCmd = `diff ${mergeBase}..HEAD`;
+        args.push(`${mergeBase}..HEAD`);
       }
     } else {
       // Target is a specific branch: committed diff only
-      diffCmd = `diff ${mergeBase}..${selection.targetBranch}`;
+      args.push(`${mergeBase}..${selection.targetBranch}`);
     }
 
     if (filePaths && filePaths.length > 0) {
-      diffCmd += ` -- ${filePaths.join(' ')}`;
+      args.push('--', ...filePaths);
     }
 
     // Write diff to a temp file to avoid ENOBUFS with large diffs.
-    // exec pipe buffers are limited; redirecting to a file sidesteps this.
+    // execFile avoids shell interpretation, preventing command injection.
     const tmpFile = path.join(os.tmpdir(), `copilot-review-diff-${process.pid}-${Date.now()}.patch`);
     try {
-      await execAsync(`git ${diffCmd} > "${tmpFile}"`, {
+      const { stdout } = await execFileAsync('git', args, {
         cwd: this.cwd,
-        // stdout goes to the file, only stderr uses the pipe buffer
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: 50 * 1024 * 1024,
       });
+      await fs.promises.writeFile(tmpFile, stdout, 'utf-8');
       const content = await fs.promises.readFile(tmpFile, 'utf-8');
       return content.trim();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`git diff failed: ${msg}`);
     } finally {
-      try { await fs.promises.unlink(tmpFile); } catch { /* ignore cleanup errors */ }
+      try {
+        await fs.promises.unlink(tmpFile);
+      } catch (cleanupErr: unknown) {
+        const cleanupMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+        console.warn(`Failed to clean up temp diff file ${tmpFile}: ${cleanupMsg}`);
+      }
     }
   }
 
