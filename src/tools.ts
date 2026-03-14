@@ -137,14 +137,14 @@ async function executeSearchCodebase(input: ToolCallInput, workspacePath: string
 
   const fileGlob = input.fileGlob ? String(input.fileGlob) : undefined;
 
-  // Use git grep with line numbers
+  // Use git grep with line numbers; -m limits matches per file at the source
   let raw: string;
   try {
     const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
-    const cmd = `git grep -n -I --no-color -- ${escapeShellArg(pattern)} ${globArgs}`;
+    const cmd = `git grep -n -I --no-color -m ${MAX_SEARCH_MATCHES} -- ${escapeShellArg(pattern)} ${globArgs}`;
     const { stdout } = await execAsync(cmd, {
       cwd: workspacePath,
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: 1024 * 1024,
     });
     raw = stdout.trim();
   } catch (err: any) {
@@ -225,45 +225,52 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
 
   const fileGlob = input.fileGlob ? String(input.fileGlob) : undefined;
 
-  // Use a single git grep -n call to get line locations, then derive per-file counts
-  let raw: string;
+  const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
+  const escapedSymbol = escapeShellArg(symbol);
+
+  // Use git grep -c (count mode) to get per-file counts without buffering all lines
+  let countRaw: string;
   try {
-    const globArgs = fileGlob ? `-- ${escapeShellArg(fileGlob)}` : '';
-    const cmd = `git grep -n -I --no-color -- ${escapeShellArg(symbol)} ${globArgs}`;
-    const { stdout } = await execAsync(cmd, {
+    const countCmd = `git grep -w -c -I --no-color -- ${escapedSymbol} ${globArgs}`;
+    const { stdout } = await execAsync(countCmd, {
       cwd: workspacePath,
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: 1024 * 1024,
     });
-    raw = stdout.trim();
+    countRaw = stdout.trim();
   } catch (err: any) {
     if (err.code === 1) { return `Symbol "${symbol}": 0 references found.`; }
     return `Search error: ${err.message}`;
   }
 
-  if (!raw) { return `Symbol "${symbol}": 0 references found.`; }
+  if (!countRaw) { return `Symbol "${symbol}": 0 references found.`; }
 
-  const allLines = raw.split('\n').filter(Boolean);
-
-  // Derive per-file counts by grouping results
-  const countMap = new Map<string, number>();
-  for (const line of allLines) {
-    const match = line.match(/^(.+?):\d+:/);
+  // Parse per-file counts from "file:count" lines
+  let totalCount = 0;
+  const fileCounts: Array<{ file: string; count: number }> = [];
+  for (const line of countRaw.split('\n')) {
+    const match = line.match(/^(.+):(\d+)$/);
     if (match) {
-      countMap.set(match[1], (countMap.get(match[1]) || 0) + 1);
+      const count = Number(match[2]);
+      totalCount += count;
+      fileCounts.push({ file: match[1], count });
     }
   }
 
-  let totalCount = 0;
-  const fileCounts: Array<{ file: string; count: number }> = [];
-  for (const [file, count] of countMap) {
-    totalCount += count;
-    fileCounts.push({ file, count });
+  // Fetch a small set of sample locations with -m 10 to limit output
+  let sampleLines = '';
+  try {
+    const sampleCmd = `git grep -w -n -I --no-color -m 10 -- ${escapedSymbol} ${globArgs}`;
+    const { stdout } = await execAsync(sampleCmd, {
+      cwd: workspacePath,
+      maxBuffer: 512 * 1024,
+    });
+    const sampleRaw = stdout.trim();
+    if (sampleRaw) {
+      sampleLines = '\n\nSample locations:\n' + sampleRaw.split('\n').slice(0, 10).join('\n');
+    }
+  } catch {
+    // Non-critical; proceed without samples
   }
-
-  // Extract first 10 lines as sample locations from the same result set
-  const sampleLines = allLines.length > 0
-    ? '\n\nSample locations:\n' + allLines.slice(0, 10).join('\n')
-    : '';
 
   const summary = `Symbol "${symbol}": ${totalCount} reference${totalCount !== 1 ? 's' : ''} across ${fileCounts.length} file${fileCounts.length !== 1 ? 's' : ''}.`;
   const breakdown = fileCounts

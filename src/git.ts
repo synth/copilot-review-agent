@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
+import { promisify } from 'util';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -11,6 +12,8 @@ import { minimatch } from './minimatch';
  * Uses child_process for reliability (the Git Extension API diff methods
  * don't support arbitrary ref comparisons as flexibly).
  */
+const execAsync = promisify(exec);
+
 export class GitDiffEngine {
   private cwd: string;
 
@@ -77,7 +80,7 @@ export class GitDiffEngine {
    * @param selection Branch selection with base/target/mergeBase
    * @param filePaths Optional: limit to specific files
    */
-  getDiff(selection: BranchSelection, filePaths?: string[]): string {
+  async getDiff(selection: BranchSelection, filePaths?: string[]): Promise<string> {
     const mergeBase = selection.mergeBase || this.getMergeBase(selection.baseBranch, selection.targetBranch || 'HEAD');
 
     let diffCmd: string;
@@ -99,23 +102,21 @@ export class GitDiffEngine {
     }
 
     // Write diff to a temp file to avoid ENOBUFS with large diffs.
-    // execSync pipe buffers are limited; redirecting to a file sidesteps this.
+    // exec pipe buffers are limited; redirecting to a file sidesteps this.
     const tmpFile = path.join(os.tmpdir(), `copilot-review-diff-${process.pid}-${Date.now()}.patch`);
     try {
-      // Note: This method is synchronous and may block the extension host thread for large diffs.
-      // Consider refactoring to async if non-blocking behavior is required.
-      execSync(`git ${diffCmd} > "${tmpFile}"`, {
+      await execAsync(`git ${diffCmd} > "${tmpFile}"`, {
         cwd: this.cwd,
-        encoding: 'utf-8',
         // stdout goes to the file, only stderr uses the pipe buffer
         maxBuffer: 10 * 1024 * 1024,
       });
-      return fs.readFileSync(tmpFile, 'utf-8').trim();
+      const content = await fs.promises.readFile(tmpFile, 'utf-8');
+      return content.trim();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`git diff failed: ${msg}`);
     } finally {
-      try { fs.unlinkSync(tmpFile); } catch { /* ignore cleanup errors */ }
+      try { await fs.promises.unlink(tmpFile); } catch { /* ignore cleanup errors */ }
     }
   }
 

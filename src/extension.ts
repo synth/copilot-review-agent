@@ -987,7 +987,7 @@ export function activate(context: vscode.ExtensionContext) {
       const gitDiffSubId = nextSubId();
       sidebar.addSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'running' });
 
-      const rawDiff = engine.getDiff(selection, filePaths);
+      const rawDiff = await engine.getDiff(selection, filePaths);
       if (!rawDiff.trim()) {
         sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done', detail: 'No changes' });
         sidebar.updateTask({ id: diffTaskId, status: 'done', detail: 'No changes found' });
