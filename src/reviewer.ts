@@ -207,6 +207,21 @@ If there are no findings, respond with: []`;
   }
 
   /**
+   * Rebuild the conversation for models that reject tool-enabled requests.
+   * Keep prior context, but add an explicit instruction that tools are unavailable.
+   */
+  private buildToolUnavailableFallbackMessages(
+    messages: vscode.LanguageModelChatMessage[]
+  ): vscode.LanguageModelChatMessage[] {
+    const fallbackInstruction = 'Tools are unavailable for this model. Do not emit tool calls or pseudo-tool syntax. Review using only the provided diff and prior context, and respond with ONLY the JSON array of findings.';
+
+    return [
+      ...messages.map(message => new vscode.LanguageModelChatMessage(message.role, [...message.content], message.name)),
+      vscode.LanguageModelChatMessage.User(fallbackInstruction),
+    ];
+  }
+
+  /**
    * Run the agent loop: send messages with tool definitions to the LLM,
    * handle tool call responses, execute tools, and re-send until the model
    * responds with pure text (the findings JSON).
@@ -245,7 +260,8 @@ If there are no findings, respond with: []`;
       } catch (err: any) {
         // If the model doesn't support tools, fall back to single pass
         if (err?.message?.includes('tool') || err?.code === 'tool-not-supported') {
-          return this.sendSinglePass(messages, token, onToken);
+          const fallbackMessages = this.buildToolUnavailableFallbackMessages(messages);
+          return this.sendSinglePass(fallbackMessages, token, onToken);
         }
         throw err;
       }
