@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { execSync, execFile } from 'child_process';
-import { promisify } from 'util';
+import { execSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -12,8 +11,6 @@ import { minimatch } from './minimatch';
  * Uses child_process for reliability (the Git Extension API diff methods
  * don't support arbitrary ref comparisons as flexibly).
  */
-const execFileAsync = promisify(execFile);
-
 export class GitDiffEngine {
   private cwd: string;
 
@@ -76,7 +73,7 @@ export class GitDiffEngine {
 
   /**
    * Get the unified diff between the merge base and the target.
-   * Uses a temp file to avoid ENOBUFS on large diffs.
+    * Streams the diff into a secure temp file to avoid buffering large output.
    * @param selection Branch selection with base/target/mergeBase
    * @param filePaths Optional: limit to specific files
    */
@@ -101,15 +98,12 @@ export class GitDiffEngine {
       args.push('--', ...filePaths);
     }
 
-    // Write diff to a temp file to avoid ENOBUFS with large diffs.
-    // execFile avoids shell interpretation, preventing command injection.
-    const tmpFile = path.join(os.tmpdir(), `copilot-review-diff-${process.pid}-${Date.now()}.patch`);
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'copilot-review-diff-'));
+    const tmpFile = path.join(tempDir, 'diff.patch');
     try {
-      const { stdout } = await execFileAsync('git', args, {
-        cwd: this.cwd,
-        maxBuffer: 50 * 1024 * 1024,
-      });
-      await fs.promises.writeFile(tmpFile, stdout, 'utf-8');
+      await fs.promises.chmod(tempDir, 0o700);
+      await this.streamGitDiffToFile(args, tmpFile);
+
       const content = await fs.promises.readFile(tmpFile, 'utf-8');
       return content.trim();
     } catch (err: unknown) {
@@ -117,12 +111,61 @@ export class GitDiffEngine {
       throw new Error(`git diff failed: ${msg}`);
     } finally {
       try {
-        await fs.promises.unlink(tmpFile);
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
       } catch (cleanupErr: unknown) {
         const cleanupMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-        console.warn(`Failed to clean up temp diff file ${tmpFile}: ${cleanupMsg}`);
+        console.warn(`Failed to clean up temp diff directory ${tempDir}: ${cleanupMsg}`);
       }
     }
+  }
+
+  private streamGitDiffToFile(args: string[], outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(outputPath, {
+        encoding: 'utf-8',
+        flags: 'wx',
+        mode: 0o600,
+      });
+      const child = spawn('git', args, { cwd: this.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      let settled = false;
+
+      const finish = (err?: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      };
+
+      output.on('error', finish);
+
+      child.on('error', finish);
+
+      child.stderr.setEncoding('utf-8');
+      child.stderr.on('data', chunk => {
+        stderr += chunk;
+      });
+
+      child.stdout.on('error', finish);
+      child.stdout.pipe(output);
+
+      child.on('close', code => {
+        output.end(() => {
+          if (code === 0) {
+            finish();
+            return;
+          }
+
+          const message = stderr.trim() || `git diff exited with code ${code}`;
+          finish(new Error(message));
+        });
+      });
+    });
   }
 
   /**

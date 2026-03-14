@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import { toGitGlobPathspec } from './gitGlob';
 
 const execFileAsync = promisify(execFile);
 
@@ -167,6 +168,14 @@ function resolveWorkspaceUri(workspacePath: string, relPath: string): vscode.Uri
   return vscode.Uri.file(resolved);
 }
 
+function appendGitGrepFileGlob(args: string[], fileGlob?: string): void {
+  if (!fileGlob) {
+    return;
+  }
+
+  args.push('--', toGitGlobPathspec(fileGlob));
+}
+
 async function executeSearchCodebase(input: ToolCallInput, workspacePath: string): Promise<string> {
   const pattern = String(input.pattern || '');
   if (!pattern) { return 'Error: pattern is required'; }
@@ -181,9 +190,7 @@ async function executeSearchCodebase(input: ToolCallInput, workspacePath: string
       '-m', String(MAX_SEARCH_MATCHES),
       '-e', pattern,
     ];
-    if (fileGlob) {
-      args.push('--', fileGlob);
-    }
+    appendGitGrepFileGlob(args, fileGlob);
     const { stdout } = await execFileAsync('git', args, {
       cwd: workspacePath,
       maxBuffer: 1024 * 1024,
@@ -264,10 +271,10 @@ async function executeCheckSymbolUsage(input: ToolCallInput, workspacePath: stri
   // Fallback: use git grep with execFile (argv array, no shell)
   // Run count and sample queries in parallel
   const countArgs = ['grep', '-w', '-c', '-I', '--no-color', '-e', symbol];
-  if (fileGlob) { countArgs.push('--', fileGlob); }
+  appendGitGrepFileGlob(countArgs, fileGlob);
 
   const sampleArgs = ['grep', '-w', '-n', '-I', '--no-color', '-m', '10', '-e', symbol];
-  if (fileGlob) { sampleArgs.push('--', fileGlob); }
+  appendGitGrepFileGlob(sampleArgs, fileGlob);
 
   const [countResult, sampleResult] = await Promise.all([
     execFileAsync('git', countArgs, { cwd: workspacePath, maxBuffer: 1024 * 1024 })
