@@ -1156,6 +1156,8 @@ export function activate(context: vscode.ExtensionContext) {
         });
         legacyStep('Running specialist subagents', 'running');
 
+        const subagentSubStepIds = new Map<string, string>();
+
         try {
           const tier2Findings = await reviewer.runSubagents(
             diffFiles,
@@ -1163,6 +1165,7 @@ export function activate(context: vscode.ExtensionContext) {
             token,
             (agent) => {
               const agentSubId = nextSubId();
+              subagentSubStepIds.set(agent.id, agentSubId);
               sidebar.addSubStep({
                 taskId: subagentTaskId, id: agentSubId,
                 label: agent.label,
@@ -1170,8 +1173,16 @@ export function activate(context: vscode.ExtensionContext) {
               });
             },
             (agent, findings) => {
-              // Find the running sub-step for this agent and mark it done
               const detail = `${findings.length} finding${findings.length !== 1 ? 's' : ''}`;
+              const subStepId = subagentSubStepIds.get(agent.id);
+              if (subStepId) {
+                sidebar.updateSubStep({
+                  taskId: subagentTaskId,
+                  id: subStepId,
+                  status: 'done',
+                  detail,
+                });
+              }
               legacyStep(agent.label, 'done', detail);
             },
             (toolName, _input) => {

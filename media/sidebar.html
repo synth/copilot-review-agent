@@ -473,12 +473,12 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
   <div id="new-review-controls">
     <div class="section">
       <h3>Branch Selection</h3>
-      <label for="base-branch">Base branch</label>
-      <select id="base-branch" class="native-select"><option value="">Loading branches…</option></select>
-      <div id="base-picker" class="branch-picker"></div>
-      <label for="target-branch">Target</label>
-      <select id="target-branch" class="native-select"><option value="">Loading branches…</option></select>
-      <div id="target-picker" class="branch-picker"></div>
+      <label id="base-branch-label">Base branch</label>
+      <select id="base-branch" class="native-select" aria-labelledby="base-branch-label"><option value="">Loading branches…</option></select>
+      <div id="base-picker" class="branch-picker" aria-labelledby="base-branch-label"></div>
+      <label id="target-branch-label">Target</label>
+      <select id="target-branch" class="native-select" aria-labelledby="target-branch-label"><option value="">Loading branches…</option></select>
+      <div id="target-picker" class="branch-picker" aria-labelledby="target-branch-label"></div>
       <div id="branch-summary" class="branch-display hidden">
         <span class="branch-tag" id="base-tag">—</span>
         <span class="arrow">←</span>

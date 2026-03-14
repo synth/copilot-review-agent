@@ -234,6 +234,12 @@ async function loadYamlConfig(): Promise<FileConfig> {
         : undefined,
       customInstructions: typeof parsed['custom_instructions'] === 'string' ? parsed['custom_instructions'] : undefined,
       maxFindings: Number.isFinite(rawMaxFindings) ? rawMaxFindings as number : undefined,
+      maxToolCallsPerAgent: Number.isFinite(parsed['max_tool_calls_per_agent']) ? parsed['max_tool_calls_per_agent'] as number : undefined,
+      subagents: typeof parsed['subagents'] === 'boolean' ? parsed['subagents'] : undefined,
+      enabledSubagents: Array.isArray(parsed['enabled_subagents']) && parsed['enabled_subagents'].every(item => typeof item === 'string')
+        ? parsed['enabled_subagents']
+        : undefined,
+      parallelSubagents: Number.isFinite(parsed['parallel_subagents']) ? parsed['parallel_subagents'] as number : undefined,
     };
   } catch (err) {
     vscode.window.showWarningMessage(`Copilot Review Agent: Failed to parse .copilot-review-agent.yml: ${err}`);

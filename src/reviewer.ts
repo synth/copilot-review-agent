@@ -548,7 +548,7 @@ ${truncatedContent}
     const agents = getActiveSubagents(config, files);
     if (agents.length === 0) { return []; }
 
-    const parallelLimit = config.parallelSubagents;
+    const parallelLimit = Math.max(1, config.parallelSubagents ?? 1);
     const allFindings: ReviewFinding[] = [];
 
     // Run subagents in batches of parallelLimit
