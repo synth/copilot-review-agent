@@ -7,7 +7,7 @@ import { loadConfig, generateSampleConfig, getInstructionsFilePath, INSTRUCTIONS
 import { GitDiffEngine, pickBaseBranch, pickTargetBranch } from './git';
 import { resetWarnings } from './minimatch';
 import { chunkDiffFiles } from './chunker';
-import { ReviewEngine } from './reviewer';
+import { ReviewCallbacks, ReviewEngine, ReviewProgressEvent } from './reviewer';
 import { clearFileCache } from './tools';
 import { CommentManager } from './comments';
 import { TaskListProvider, TaskListItem } from './taskList';
@@ -35,6 +35,15 @@ export function activate(context: vscode.ExtensionContext) {
   const commentManager = new CommentManager();
   const taskListProvider = new TaskListProvider();
   const reviewEngine = new ReviewEngine();
+  const diagnosticsChannel = vscode.window.createOutputChannel('Copilot Review Agent Diagnostics');
+
+  const nowMs = (): number => Date.now();
+  const formatDuration = (durationMs: number): string => (
+    durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
+  );
+  const writeDiagnostic = (message: string): void => {
+    diagnosticsChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
+  };
 
   // Sidebar webview provider
   const sidebarProvider = new SidebarViewProvider(context.extensionUri);
@@ -857,6 +866,7 @@ export function activate(context: vscode.ExtensionContext) {
     commentManager,
     treeView,
     statusBarItem,
+    diagnosticsChannel,
     sidebarProvider,
     sidebarRegistration,
     reviewBranchCmd,
@@ -968,8 +978,60 @@ export function activate(context: vscode.ExtensionContext) {
     const tokenSource = new vscode.CancellationTokenSource();
     activeTokenSource = tokenSource;
     const token = tokenSource.token;
+    const reviewStartedAt = nowMs();
+
+    const logReview = (message: string): void => {
+      writeDiagnostic(`[review ${sessionId}] ${message}`);
+    };
+
+    const describeChunkProgress = (event: ReviewProgressEvent, totalToolCalls: number): { label: string; detail?: string } => {
+      switch (event.phase) {
+        case 'building-context':
+          return {
+            label: 'Preparing AI prompt',
+            detail: event.detail,
+          };
+        case 'requesting-model':
+          return {
+            label: event.iteration && event.iteration > 1 ? 'Requesting next AI pass' : 'Requesting AI analysis',
+            detail: event.detail,
+          };
+        case 'awaiting-first-token':
+          return {
+            label: 'Waiting for first AI token',
+            detail: event.detail || (event.iteration ? `Iteration ${event.iteration}` : undefined),
+          };
+        case 'streaming-response':
+          return {
+            label: 'Streaming AI analysis',
+            detail: event.elapsedMs != null
+              ? `First token in ${formatDuration(event.elapsedMs)}${totalToolCalls > 0 ? ` • ${totalToolCalls} tool call${totalToolCalls !== 1 ? 's' : ''}` : ''}`
+              : undefined,
+          };
+        case 'executing-tools':
+          return {
+            label: `Running ${event.toolCalls ?? 0} tool check${event.toolCalls === 1 ? '' : 's'}`,
+            detail: [
+              event.iteration ? `Iteration ${event.iteration}` : undefined,
+              event.elapsedMs != null ? `model responded in ${formatDuration(event.elapsedMs)}` : undefined,
+            ].filter(Boolean).join(' • ') || undefined,
+          };
+        case 'parsing-response':
+          return {
+            label: 'Parsing AI findings',
+            detail: event.elapsedMs != null ? `Response ready in ${formatDuration(event.elapsedMs)}` : event.detail,
+          };
+        case 'complete':
+          return {
+            label: 'AI analysis complete',
+            detail: event.detail,
+          };
+      }
+    };
 
     try {
+      logReview(`Started review for ${selection.baseBranch}..${selection.targetBranch || 'HEAD+wt'}`);
+
       // ────────────────────────────────
       // Task 1: Compute diff
       // ────────────────────────────────
@@ -988,37 +1050,45 @@ export function activate(context: vscode.ExtensionContext) {
       const gitDiffSubId = nextSubId();
       sidebar.addSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'running' });
 
+      const diffStartedAt = nowMs();
       const rawDiff = await engine.getDiff(selection, filePaths);
+      const diffDurationMs = nowMs() - diffStartedAt;
       if (!rawDiff.trim()) {
-        sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done', detail: 'No changes' });
+        sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done', detail: `No changes • ${formatDuration(diffDurationMs)}` });
         sidebar.updateTask({ id: diffTaskId, status: 'done', detail: 'No changes found' });
         legacyStep('Computing diff', 'done', 'No changes found');
+        logReview(`Diff completed with no changes in ${formatDuration(diffDurationMs)}`);
         vscode.window.showInformationMessage('Copilot Review Agent: No changes found between the branches.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
         reviewInProgress = false;
         return;
       }
-      sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done' });
+      sidebar.updateSubStep({ taskId: diffTaskId, id: gitDiffSubId, label: 'Running git diff', status: 'done', detail: formatDuration(diffDurationMs) });
+      logReview(`Collected git diff in ${formatDuration(diffDurationMs)}`);
 
       // Sub-step: parse diff
       const parseSubId = nextSubId();
       sidebar.addSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'running' });
+      const parseStartedAt = nowMs();
       const diffFiles = engine.parseDiff(rawDiff, config.excludePaths);
+      const parseDurationMs = nowMs() - parseStartedAt;
 
       if (diffFiles.length === 0) {
-        sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: 'All files excluded' });
+        sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: `All files excluded • ${formatDuration(parseDurationMs)}` });
         sidebar.updateTask({ id: diffTaskId, status: 'done', detail: 'All files excluded' });
         legacyStep('Computing diff', 'done', 'All files excluded');
+        logReview(`Parsed diff in ${formatDuration(parseDurationMs)}; all files excluded`);
         vscode.window.showInformationMessage('Copilot Review Agent: All changed files are excluded.');
         updateStatusBar('idle');
         sidebar.setReviewState('idle');
         reviewInProgress = false;
         return;
       }
-      sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: `${diffFiles.length} file${diffFiles.length !== 1 ? 's' : ''} changed` });
+      sidebar.updateSubStep({ taskId: diffTaskId, id: parseSubId, label: 'Parsing diff output', status: 'done', detail: `${diffFiles.length} file${diffFiles.length !== 1 ? 's' : ''} changed • ${formatDuration(parseDurationMs)}` });
       legacyStep('Computing diff', 'done');
       legacyStep('Parsing diff', 'done', `${diffFiles.length} file${diffFiles.length !== 1 ? 's' : ''}`);
+      logReview(`Parsed diff into ${diffFiles.length} file(s) in ${formatDuration(parseDurationMs)}`);
 
       // Sub-step: list changed files
       for (const df of diffFiles) {
@@ -1030,9 +1100,12 @@ export function activate(context: vscode.ExtensionContext) {
       // Sub-step: resolve file contents
       const resolveSubId = nextSubId();
       sidebar.addSubStep({ taskId: diffTaskId, id: resolveSubId, label: 'Loading full file contents', status: 'running' });
+      const resolveStartedAt = nowMs();
       engine.resolveFileContents(diffFiles, selection);
-      sidebar.updateSubStep({ taskId: diffTaskId, id: resolveSubId, label: 'Loading full file contents', status: 'done', detail: `${diffFiles.length} files` });
+      const resolveDurationMs = nowMs() - resolveStartedAt;
+      sidebar.updateSubStep({ taskId: diffTaskId, id: resolveSubId, label: 'Loading full file contents', status: 'done', detail: `${diffFiles.length} files • ${formatDuration(resolveDurationMs)}` });
       legacyStep('Loading file contents', 'done', `${diffFiles.length} files`);
+      logReview(`Resolved full file contents in ${formatDuration(resolveDurationMs)}`);
 
       sidebar.updateTask({ id: diffTaskId, status: 'done', detail: `${diffFiles.length} file${diffFiles.length !== 1 ? 's' : ''}` });
 
@@ -1043,7 +1116,9 @@ export function activate(context: vscode.ExtensionContext) {
       sidebar.addTask({ id: chunkTaskId, label: 'Preparing review chunks', status: 'running', collapsible: true });
       legacyStep('Preparing review chunks', 'running');
 
+      const chunkingStartedAt = nowMs();
       const chunks = chunkDiffFiles(diffFiles, config);
+      const chunkingDurationMs = nowMs() - chunkingStartedAt;
 
       for (let i = 0; i < chunks.length; i++) {
         const files = chunks[i].files.map(f => f.path).join(', ');
@@ -1057,8 +1132,9 @@ export function activate(context: vscode.ExtensionContext) {
         });
       }
 
-      sidebar.updateTask({ id: chunkTaskId, status: 'done', detail: `${chunks.length} chunk${chunks.length !== 1 ? 's' : ''}` });
+      sidebar.updateTask({ id: chunkTaskId, status: 'done', detail: `${chunks.length} chunk${chunks.length !== 1 ? 's' : ''} • ${formatDuration(chunkingDurationMs)}` });
       legacyStep('Preparing review chunks', 'done', `${chunks.length} chunk${chunks.length !== 1 ? 's' : ''}`);
+      logReview(`Prepared ${chunks.length} chunk(s) in ${formatDuration(chunkingDurationMs)}`);
 
       // ────────────────────────────────
       // Task 3+: AI review per chunk
@@ -1091,23 +1167,54 @@ export function activate(context: vscode.ExtensionContext) {
 
         // Sub-step: AI analysis (with streaming tokens)
         const aiSubId = nextSubId();
-        sidebar.addSubStep({ taskId: reviewTaskId, id: aiSubId, label: 'Waiting for AI response…', status: 'running' });
+        sidebar.addSubStep({ taskId: reviewTaskId, id: aiSubId, label: 'Preparing AI prompt', status: 'running', detail: `~${Math.round(chunk.tokenEstimate / 1000)}k tokens` });
 
         const chunkLabel = `Reviewing chunk ${i + 1}/${chunks.length}`;
         legacyStep(chunkLabel, 'running', chunkFiles.join(', '));
+        const chunkStartedAt = nowMs();
+        let chunkToolCalls = 0;
+
+        const reviewCallbacks: ReviewCallbacks = {
+          onToken: (fragment) => {
+            sidebar.streamToken(reviewTaskId, aiSubId, fragment);
+          },
+          onToolCall: (toolName, _input) => {
+            chunkToolCalls++;
+            sidebar.updateSubStep({
+              taskId: reviewTaskId,
+              id: aiSubId,
+              label: 'Running tool checks',
+              status: 'running',
+              detail: `${chunkToolCalls} call${chunkToolCalls !== 1 ? 's' : ''} so far • last: ${toolName}`,
+            });
+            logReview(`Chunk ${i + 1}/${chunks.length}: tool call ${chunkToolCalls} -> ${toolName}`);
+          },
+          onProgress: (event) => {
+            const progress = describeChunkProgress(event, chunkToolCalls);
+            sidebar.updateSubStep({
+              taskId: reviewTaskId,
+              id: aiSubId,
+              label: progress.label,
+              status: 'running',
+              detail: progress.detail,
+            });
+
+            const detail = progress.detail ? ` (${progress.detail})` : '';
+            logReview(`Chunk ${i + 1}/${chunks.length}: ${progress.label}${detail}`);
+          },
+        };
 
         try {
-          const findings = await reviewer.reviewChunk(chunk, config, token, (fragment) => {
-            sidebar.streamToken(reviewTaskId, aiSubId, fragment);
-          });
+          const findings = await reviewer.reviewChunk(chunk, config, token, reviewCallbacks);
 
           allFindings.push(...findings);
+          const chunkDurationMs = nowMs() - chunkStartedAt;
 
           sidebar.updateSubStep({
             taskId: reviewTaskId, id: aiSubId,
             label: 'AI analysis complete',
             status: 'done',
-            detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''}`,
+            detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''} • ${chunkToolCalls} tool call${chunkToolCalls !== 1 ? 's' : ''} • ${formatDuration(chunkDurationMs)}`,
           });
 
           // Sub-steps: list each finding
@@ -1122,13 +1229,16 @@ export function activate(context: vscode.ExtensionContext) {
             });
           }
 
-          sidebar.updateTask({ id: reviewTaskId, status: 'done', detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''}` });
+          sidebar.updateTask({ id: reviewTaskId, status: 'done', detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''} • ${formatDuration(chunkDurationMs)}` });
           legacyStep(chunkLabel, 'done', `${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
+          logReview(`Chunk ${i + 1}/${chunks.length} completed in ${formatDuration(chunkDurationMs)} with ${findings.length} finding(s) and ${chunkToolCalls} tool call(s)`);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
+          const chunkDurationMs = nowMs() - chunkStartedAt;
           sidebar.updateSubStep({ taskId: reviewTaskId, id: aiSubId, label: 'AI analysis failed', status: 'error', detail: msg });
           sidebar.updateTask({ id: reviewTaskId, status: 'error', detail: msg });
           legacyStep(chunkLabel, 'error', msg);
+          logReview(`Chunk ${i + 1}/${chunks.length} failed after ${formatDuration(chunkDurationMs)}: ${msg}`);
           vscode.window.showWarningMessage(`Copilot Review Agent: Chunk ${i + 1} failed: ${msg}`);
         }
       }
@@ -1158,6 +1268,8 @@ export function activate(context: vscode.ExtensionContext) {
         legacyStep('Running specialist subagents', 'running');
 
         const subagentSubStepIds = new Map<string, string>();
+        const subagentStartedAt = nowMs();
+        const subagentStartTimes = new Map<string, number>();
 
         try {
           const tier2Findings = await reviewer.runSubagents(
@@ -1165,44 +1277,54 @@ export function activate(context: vscode.ExtensionContext) {
             config,
             token,
             (agent) => {
+              subagentStartTimes.set(agent.id, nowMs());
               const agentSubId = nextSubId();
               subagentSubStepIds.set(agent.id, agentSubId);
               sidebar.addSubStep({
                 taskId: subagentTaskId, id: agentSubId,
-                label: agent.label,
+                label: `Running ${agent.label}`,
                 status: 'running',
+                detail: 'Preparing specialist review',
               });
+              logReview(`Subagent ${agent.label} started`);
             },
             (agent, findings) => {
-              const detail = `${findings.length} finding${findings.length !== 1 ? 's' : ''}`;
+              const durationMs = nowMs() - (subagentStartTimes.get(agent.id) ?? subagentStartedAt);
+              const detail = `${findings.length} finding${findings.length !== 1 ? 's' : ''} • ${formatDuration(durationMs)}`;
               const subStepId = subagentSubStepIds.get(agent.id);
               if (subStepId) {
                 sidebar.updateSubStep({
                   taskId: subagentTaskId,
                   id: subStepId,
+                  label: `${agent.label} complete`,
                   status: 'done',
                   detail,
                 });
               }
               legacyStep(agent.label, 'done', detail);
+              logReview(`Subagent ${agent.label} completed in ${formatDuration(durationMs)} with ${findings.length} finding(s)`);
             },
             (toolName, _input) => {
               legacyStep(`Tool: ${toolName}`, 'done');
+              logReview(`Specialist tool call -> ${toolName}`);
             }
           );
 
           allFindings.push(...tier2Findings);
+          const subagentDurationMs = nowMs() - subagentStartedAt;
 
           sidebar.updateTask({
             id: subagentTaskId,
             status: 'done',
-            detail: `${tier2Findings.length} finding${tier2Findings.length !== 1 ? 's' : ''} from specialists`,
+            detail: `${tier2Findings.length} finding${tier2Findings.length !== 1 ? 's' : ''} from specialists • ${formatDuration(subagentDurationMs)}`,
           });
           legacyStep('Running specialist subagents', 'done', `${tier2Findings.length} finding${tier2Findings.length !== 1 ? 's' : ''}`);
+          logReview(`Specialist review completed in ${formatDuration(subagentDurationMs)} with ${tier2Findings.length} finding(s)`);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           sidebar.updateTask({ id: subagentTaskId, status: 'error', detail: msg });
           legacyStep('Running specialist subagents', 'error', msg);
+          logReview(`Specialist review failed: ${msg}`);
           vscode.window.showWarningMessage(`Specialist analysis failed: ${msg}. Review continues with initial findings only.`);
         }
       }
@@ -1278,11 +1400,13 @@ export function activate(context: vscode.ExtensionContext) {
         ...(wasCancelled ? { partial: true } : {}),
       };
       await reviewStore.save(session);
+      logReview(`Review completed in ${formatDuration(nowMs() - reviewStartedAt)} with ${deduped.length} persisted finding(s)`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       const errTaskId = nextTaskId();
       sidebar.addTask({ id: errTaskId, label: 'Error', status: 'error', detail: msg });
       legacyStep('Error', 'error', msg);
+      logReview(`Review failed after ${formatDuration(nowMs() - reviewStartedAt)}: ${msg}`);
       vscode.window.showErrorMessage(`Copilot Review Agent: ${msg}`);
       updateStatusBar('idle');
       sidebar.setReviewState('error');

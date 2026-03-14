@@ -12,6 +12,29 @@ export interface ToolCallReporter {
   (toolName: string, input: Record<string, unknown>): void;
 }
 
+export type ReviewProgressPhase =
+  | 'building-context'
+  | 'requesting-model'
+  | 'awaiting-first-token'
+  | 'streaming-response'
+  | 'executing-tools'
+  | 'parsing-response'
+  | 'complete';
+
+export interface ReviewProgressEvent {
+  phase: ReviewProgressPhase;
+  iteration?: number;
+  elapsedMs?: number;
+  toolCalls?: number;
+  detail?: string;
+}
+
+export interface ReviewCallbacks {
+  onToken?: (fragment: string) => void;
+  onToolCall?: ToolCallReporter;
+  onProgress?: (event: ReviewProgressEvent) => void;
+}
+
 export class ReviewEngine {
   private model: vscode.LanguageModelChat | undefined;
   private _selectedModelId: string | undefined;
@@ -237,12 +260,11 @@ If there are no findings, respond with: []`;
     messages: vscode.LanguageModelChatMessage[],
     token: vscode.CancellationToken,
     maxIterations: number = 10,
-    onToken?: (fragment: string) => void,
-    onToolCall?: ToolCallReporter
+    callbacks?: ReviewCallbacks
   ): Promise<string> {
     if (!this._workspacePath) {
       // No workspace — fall back to a single call without tools
-      return this.sendSinglePass(messages, token, onToken);
+      return this.sendSinglePass(messages, token, callbacks);
     }
 
     const tools = REVIEW_TOOLS;
@@ -250,6 +272,12 @@ If there are no findings, respond with: []`;
 
     while (iteration < maxIterations) {
       if (token.isCancellationRequested) { return ''; }
+
+      callbacks?.onProgress?.({
+        phase: 'requesting-model',
+        iteration: iteration + 1,
+        detail: `Iteration ${iteration + 1}`,
+      });
 
       let response: vscode.LanguageModelChatResponse;
       try {
@@ -261,7 +289,7 @@ If there are no findings, respond with: []`;
         // If the model doesn't support tools, fall back to single pass
         if (err?.message?.includes('tool') || err?.code === 'tool-not-supported') {
           const fallbackMessages = this.buildToolUnavailableFallbackMessages(messages);
-          return this.sendSinglePass(fallbackMessages, token, onToken);
+          return this.sendSinglePass(fallbackMessages, token, callbacks);
         }
         throw err;
       }
@@ -269,14 +297,29 @@ If there are no findings, respond with: []`;
       // Collect the response stream — may contain text and/or tool calls
       let textContent = '';
       const toolCalls: Array<{ callId: string; name: string; input: ToolCallInput }> = [];
+      const requestStartedAt = Date.now();
+      let firstTokenAt: number | undefined;
+
+      callbacks?.onProgress?.({
+        phase: 'awaiting-first-token',
+        iteration: iteration + 1,
+      });
 
       try {
         for await (const part of response.stream) {
           if (token.isCancellationRequested) { return textContent; }
 
           if (part instanceof vscode.LanguageModelTextPart) {
+            if (firstTokenAt === undefined) {
+              firstTokenAt = Date.now();
+              callbacks?.onProgress?.({
+                phase: 'streaming-response',
+                iteration: iteration + 1,
+                elapsedMs: firstTokenAt - requestStartedAt,
+              });
+            }
             textContent += part.value;
-            if (onToken) { onToken(part.value); }
+            if (callbacks?.onToken) { callbacks.onToken(part.value); }
           } else if (part instanceof vscode.LanguageModelToolCallPart) {
             toolCalls.push({
               callId: part.callId,
@@ -292,6 +335,12 @@ If there are no findings, respond with: []`;
 
       // If no tool calls, the model is done — return the text
       if (toolCalls.length === 0) {
+        callbacks?.onProgress?.({
+          phase: 'parsing-response',
+          iteration: iteration + 1,
+          elapsedMs: Date.now() - requestStartedAt,
+          detail: firstTokenAt === undefined ? 'Response completed without streamed text.' : undefined,
+        });
         return textContent;
       }
 
@@ -308,9 +357,17 @@ If there are no findings, respond with: []`;
 
       // Execute all tool calls in parallel to avoid blocking the extension host
       for (const tc of toolCalls) {
-        if (onToolCall) { onToolCall(tc.name, tc.input); }
+        if (callbacks?.onToolCall) { callbacks.onToolCall(tc.name, tc.input); }
       }
 
+      callbacks?.onProgress?.({
+        phase: 'executing-tools',
+        iteration: iteration + 1,
+        toolCalls: toolCalls.length,
+        elapsedMs: Date.now() - requestStartedAt,
+      });
+
+      const toolExecutionStartedAt = Date.now();
       const toolResults = await Promise.all(
         toolCalls.map(async (tc) => {
           let result: string;
@@ -324,6 +381,13 @@ If there are no findings, respond with: []`;
       );
       const toolResultParts: vscode.LanguageModelToolResultPart[] = toolResults;
 
+      callbacks?.onProgress?.({
+        phase: 'awaiting-first-token',
+        iteration: iteration + 2,
+        elapsedMs: Date.now() - toolExecutionStartedAt,
+        detail: `Executed ${toolCalls.length} tool call${toolCalls.length !== 1 ? 's' : ''}`,
+      });
+
       // Add tool results as a User message
       messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
 
@@ -331,7 +395,7 @@ If there are no findings, respond with: []`;
     }
 
     // Max iterations reached — do one final call without tools to force a text response
-    return this.sendSinglePass(messages, token, onToken);
+    return this.sendSinglePass(messages, token, callbacks);
   }
 
   /**
@@ -340,19 +404,40 @@ If there are no findings, respond with: []`;
   private async sendSinglePass(
     messages: vscode.LanguageModelChatMessage[],
     token: vscode.CancellationToken,
-    onToken?: (fragment: string) => void
+    callbacks?: ReviewCallbacks
   ): Promise<string> {
     let fullText = '';
+    const requestStartedAt = Date.now();
+
+    callbacks?.onProgress?.({ phase: 'requesting-model', iteration: 1 });
     try {
       const response = await this.sendRequestWithRetry(messages, {
         justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
       }, token);
 
+      callbacks?.onProgress?.({ phase: 'awaiting-first-token', iteration: 1 });
+
+      let firstTokenAt: number | undefined;
       for await (const fragment of response.text) {
         if (token.isCancellationRequested) { break; }
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          callbacks?.onProgress?.({
+            phase: 'streaming-response',
+            iteration: 1,
+            elapsedMs: firstTokenAt - requestStartedAt,
+          });
+        }
         fullText += fragment;
-        if (onToken) { onToken(fragment); }
+        if (callbacks?.onToken) { callbacks.onToken(fragment); }
       }
+
+      callbacks?.onProgress?.({
+        phase: 'parsing-response',
+        iteration: 1,
+        elapsedMs: Date.now() - requestStartedAt,
+        detail: firstTokenAt === undefined ? 'Response completed without streamed text.' : undefined,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Single-pass LLM call failed (fallback/final pass): ${msg}`);
@@ -369,9 +454,13 @@ If there are no findings, respond with: []`;
     chunk: DiffChunk,
     config: CopilotReviewAgentConfig,
     token: vscode.CancellationToken,
-    onToken?: (fragment: string) => void,
-    onToolCall?: ToolCallReporter
+    callbacks?: ReviewCallbacks
   ): Promise<ReviewFinding[]> {
+    callbacks?.onProgress?.({
+      phase: 'building-context',
+      detail: `${chunk.files.length} file${chunk.files.length !== 1 ? 's' : ''}`,
+    });
+
     const systemPrompt = this.buildSystemPrompt(config);
     const chunkContext = buildChunkContext(chunk, config);
 
@@ -381,11 +470,18 @@ If there are no findings, respond with: []`;
       vscode.LanguageModelChatMessage.User(`Review the following code changes:\n\n${chunkContext}`),
     ];
 
-    const fullText = await this.sendWithToolLoop(messages, token, config.maxToolCallsPerAgent ?? 10, onToken, onToolCall);
+    const fullText = await this.sendWithToolLoop(messages, token, config.maxToolCallsPerAgent ?? 10, callbacks);
 
     if (token.isCancellationRequested) { return []; }
 
-    return this.parseFindings(fullText, config);
+    callbacks?.onProgress?.({ phase: 'parsing-response' });
+
+    const findings = this.parseFindings(fullText, config);
+    callbacks?.onProgress?.({
+      phase: 'complete',
+      detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''}`,
+    });
+    return findings;
   }
 
   /**
@@ -616,7 +712,10 @@ ${truncatedContent}
 
       try {
         const fullText = await this.sendWithToolLoop(
-          messages, token, config.maxToolCallsPerAgent ?? 10, undefined, onToolCall
+          messages,
+          token,
+          config.maxToolCallsPerAgent ?? 10,
+          { onToolCall }
         );
 
         if (token.isCancellationRequested) { break; }

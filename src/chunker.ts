@@ -1,6 +1,8 @@
 
 import { DiffFile, DiffChunk, CopilotReviewAgentConfig } from './types';
 
+const fileContextCache = new WeakMap<DiffFile, Map<number, string>>();
+
 /**
  * Priority ordering for file review (lower number = reviewed first).
  *   0 – Security-sensitive (controllers, auth)
@@ -40,6 +42,12 @@ function filePriority(filePath: string): number {
  * inflating token counts.
  */
 export function buildFileContext(file: DiffFile, config: CopilotReviewAgentConfig): string {
+  const cachedByContext = fileContextCache.get(file);
+  const cached = cachedByContext?.get(config.contextLines);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const contextLines = config.contextLines;
   const parts: string[] = [];
   parts.push(`## File: ${file.path}${file.isNew ? ' (new)' : ''}${file.isDeleted ? ' (deleted)' : ''}`);
@@ -100,7 +108,13 @@ export function buildFileContext(file: DiffFile, config: CopilotReviewAgentConfi
     }
   }
 
-  return parts.join('\n');
+  const result = parts.join('\n');
+  const nextCache = cachedByContext ?? new Map<number, string>();
+  nextCache.set(config.contextLines, result);
+  if (!cachedByContext) {
+    fileContextCache.set(file, nextCache);
+  }
+  return result;
 }
 
 /**

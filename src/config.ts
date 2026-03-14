@@ -94,14 +94,14 @@ export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
     }
   }
 
-  let yamlSubagents: string[] | undefined;
+  let yamlSubagents: boolean | undefined;
   if (rawYamlConfig?.subagents !== undefined) {
     const v = rawYamlConfig.subagents;
-    if (Array.isArray(v) && v.every(item => typeof item === 'string')) {
+    if (typeof v === 'boolean') {
       yamlSubagents = v;
     } else {
       void vscode.window.showWarningMessage(
-        'Copilot Review Agent: Invalid `subagents` in .copilot-review-agent.yml. It must be an array of strings. Using default.'
+        'Copilot Review Agent: Invalid `subagents` in .copilot-review-agent.yml. It must be a boolean. Using default.'
       );
     }
   }
