@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
-import { execSync, spawn } from 'child_process';
+import { execSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { DiffFile, DiffHunk, BranchSelection } from './types';
 import { minimatch } from './minimatch';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Git operations for computing diffs between branches.
@@ -73,14 +76,16 @@ export class GitDiffEngine {
 
   /**
    * Get the unified diff between the merge base and the target.
-    * Streams the diff into a secure temp file to avoid buffering large output.
+   * Lets git write the diff to a temp file to avoid buffering large output.
    * @param selection Branch selection with base/target/mergeBase
    * @param filePaths Optional: limit to specific files
    */
   async getDiff(selection: BranchSelection, filePaths?: string[]): Promise<string> {
     const mergeBase = selection.mergeBase || this.getMergeBase(selection.baseBranch, selection.targetBranch || 'HEAD');
 
-    const args: string[] = ['diff'];
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'copilot-review-diff-'));
+    const tmpFile = path.join(tempDir, 'diff.patch');
+    const args: string[] = ['diff', `--output=${tmpFile}`];
 
     if (!selection.targetBranch || selection.targetBranch === this.getCurrentBranch()) {
       // Target is working tree: include uncommitted changes
@@ -98,11 +103,12 @@ export class GitDiffEngine {
       args.push('--', ...filePaths);
     }
 
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'copilot-review-diff-'));
-    const tmpFile = path.join(tempDir, 'diff.patch');
     try {
       await fs.promises.chmod(tempDir, 0o700);
-      await this.streamGitDiffToFile(args, tmpFile);
+      await execFileAsync('git', args, {
+        cwd: this.cwd,
+        maxBuffer: 1024 * 1024,
+      });
 
       const content = await fs.promises.readFile(tmpFile, 'utf-8');
       return content.trim();
@@ -117,55 +123,6 @@ export class GitDiffEngine {
         console.warn(`Failed to clean up temp diff directory ${tempDir}: ${cleanupMsg}`);
       }
     }
-  }
-
-  private streamGitDiffToFile(args: string[], outputPath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const output = fs.createWriteStream(outputPath, {
-        encoding: 'utf-8',
-        flags: 'wx',
-        mode: 0o600,
-      });
-      const child = spawn('git', args, { cwd: this.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-      let stderr = '';
-      let settled = false;
-
-      const finish = (err?: Error) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      };
-
-      output.on('error', finish);
-
-      child.on('error', finish);
-
-      child.stderr.setEncoding('utf-8');
-      child.stderr.on('data', chunk => {
-        stderr += chunk;
-      });
-
-      child.stdout.on('error', finish);
-      child.stdout.pipe(output);
-
-      child.on('close', code => {
-        output.end(() => {
-          if (code === 0) {
-            finish();
-            return;
-          }
-
-          const message = stderr.trim() || `git diff exited with code ${code}`;
-          finish(new Error(message));
-        });
-      });
-    });
   }
 
   /**
