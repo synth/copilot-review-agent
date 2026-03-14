@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import { DiffFile, DiffHunk, BranchSelection } from './types';
 import { minimatch } from './minimatch';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Git operations for computing diffs between branches.
@@ -72,31 +76,53 @@ export class GitDiffEngine {
 
   /**
    * Get the unified diff between the merge base and the target.
+   * Lets git write the diff to a temp file to avoid buffering large output.
    * @param selection Branch selection with base/target/mergeBase
    * @param filePaths Optional: limit to specific files
    */
-  getDiff(selection: BranchSelection, filePaths?: string[]): string {
+  async getDiff(selection: BranchSelection, filePaths?: string[]): Promise<string> {
     const mergeBase = selection.mergeBase || this.getMergeBase(selection.baseBranch, selection.targetBranch || 'HEAD');
 
-    let diffCmd: string;
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'copilot-review-diff-'));
+    const tmpFile = path.join(tempDir, 'diff.patch');
+    const args: string[] = ['diff', `--output=${tmpFile}`];
 
     if (!selection.targetBranch || selection.targetBranch === this.getCurrentBranch()) {
       // Target is working tree: include uncommitted changes
       if (selection.includeUncommitted) {
-        diffCmd = `diff ${mergeBase}`;
+        args.push(mergeBase);
       } else {
-        diffCmd = `diff ${mergeBase}..HEAD`;
+        args.push(`${mergeBase}..HEAD`);
       }
     } else {
       // Target is a specific branch: committed diff only
-      diffCmd = `diff ${mergeBase}..${selection.targetBranch}`;
+      args.push(`${mergeBase}..${selection.targetBranch}`);
     }
 
     if (filePaths && filePaths.length > 0) {
-      diffCmd += ` -- ${filePaths.join(' ')}`;
+      args.push('--', ...filePaths);
     }
 
-    return this.git(diffCmd);
+    try {
+      await fs.promises.chmod(tempDir, 0o700);
+      await execFileAsync('git', args, {
+        cwd: this.cwd,
+        maxBuffer: 1024 * 1024,
+      });
+
+      const content = await fs.promises.readFile(tmpFile, 'utf-8');
+      return content.trim();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`git diff failed: ${msg}`);
+    } finally {
+      try {
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
+      } catch (cleanupErr: unknown) {
+        const cleanupMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+        console.warn(`Failed to clean up temp diff directory ${tempDir}: ${cleanupMsg}`);
+      }
+    }
   }
 
   /**

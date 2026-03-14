@@ -18,6 +18,10 @@ const config: CopilotReviewAgentConfig = {
   categories: [],
   customInstructions: '',
   maxFindings: 20,
+  maxToolCallsPerAgent: 10,
+  subagents: true,
+  enabledSubagents: [],
+  parallelSubagents: 4,
 };
 
 function makeHunk(newStart: number, newLines: number, addedLines: number[]): import('../src/types').DiffHunk {

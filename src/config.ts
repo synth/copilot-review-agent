@@ -12,6 +12,10 @@ const DEFAULT_CONFIG: CopilotReviewAgentConfig = {
   categories: ['security', 'performance', 'correctness', 'maintainability', 'testing', 'style'],
   customInstructions: '',
   maxFindings: 50,
+  maxToolCallsPerAgent: 10,
+  subagents: false,
+  enabledSubagents: [],
+  parallelSubagents: 4,
 };
 
 const validSeverities: Severity[] = ['blocker', 'high', 'medium', 'low', 'nit'];
@@ -73,6 +77,58 @@ export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
     vscode.window.showWarningMessage(`Copilot Review Agent: Invalid severityThreshold "${userSeverity}". Using default.`);
   }
 
+  // Validate YAML-derived maxToolCallsPerAgent explicitly; loadYamlConfig()
+  // already normalizes keys from snake_case to camelCase.
+  const yamlMaxToolCallsPerAgentRaw = (fileConfig as any).maxToolCallsPerAgent;
+
+  let yamlMaxToolCallsPerAgent: number | undefined;
+  if (yamlMaxToolCallsPerAgentRaw !== undefined) {
+    const v = yamlMaxToolCallsPerAgentRaw;
+    if (typeof v === 'number' && Number.isInteger(v) && v > 0) {
+      yamlMaxToolCallsPerAgent = v;
+    } else {
+      void vscode.window.showWarningMessage(
+        'Copilot Review Agent: Invalid `maxToolCallsPerAgent` in .copilot-review-agent.yml. It must be a positive integer. Using default.'
+      );
+    }
+  }
+
+  let yamlSubagents: boolean | undefined;
+  if (rawYamlConfig?.subagents !== undefined) {
+    const v = rawYamlConfig.subagents;
+    if (typeof v === 'boolean') {
+      yamlSubagents = v;
+    } else {
+      void vscode.window.showWarningMessage(
+        'Copilot Review Agent: Invalid `subagents` in .copilot-review-agent.yml. It must be a boolean. Using default.'
+      );
+    }
+  }
+
+  let yamlEnabledSubagents: string[] | undefined;
+  if (rawYamlConfig?.enabled_subagents !== undefined) {
+    const v = rawYamlConfig.enabled_subagents;
+    if (Array.isArray(v) && v.every(item => typeof item === 'string')) {
+      yamlEnabledSubagents = v;
+    } else {
+      void vscode.window.showWarningMessage(
+        'Copilot Review Agent: Invalid `enabled_subagents` in .copilot-review-agent.yml. It must be an array of strings. Using default.'
+      );
+    }
+  }
+
+  let yamlParallelSubagents: number | undefined;
+  if (rawYamlConfig?.parallel_subagents !== undefined) {
+    const v = rawYamlConfig.parallel_subagents;
+    if (typeof v === 'number' && Number.isInteger(v) && v > 0) {
+      yamlParallelSubagents = v;
+    } else {
+      void vscode.window.showWarningMessage(
+        'Copilot Review Agent: Invalid `parallel_subagents` in .copilot-review-agent.yml. It must be a positive integer. Using default.'
+      );
+    }
+  }
+
   // Validate categories from YAML: an explicit empty array would produce a useless
   // review prompt with no focus areas. Warn and fall back to defaults in that case.
   let resolvedCategories: Category[];
@@ -98,6 +154,10 @@ export async function loadConfig(): Promise<CopilotReviewAgentConfig> {
     categories: resolvedCategories,
     customInstructions: combinedInstructions || DEFAULT_CONFIG.customInstructions,
     maxFindings: fileConfig.maxFindings ?? DEFAULT_CONFIG.maxFindings,
+    maxToolCallsPerAgent: fileConfig.maxToolCallsPerAgent ?? yamlMaxToolCallsPerAgent ?? DEFAULT_CONFIG.maxToolCallsPerAgent,
+    subagents: fileConfig.subagents ?? yamlSubagents ?? DEFAULT_CONFIG.subagents,
+    enabledSubagents: fileConfig.enabledSubagents ?? yamlEnabledSubagents ?? DEFAULT_CONFIG.enabledSubagents,
+    parallelSubagents: fileConfig.parallelSubagents ?? yamlParallelSubagents ?? DEFAULT_CONFIG.parallelSubagents,
   };
 }
 
@@ -143,9 +203,9 @@ Edit this file to customize how the AI reviews your code.
 ## Project Context
 
 <!-- Describe your project so the AI understands the codebase -->
-- Language / framework: 
-- Architecture patterns: 
-- Key conventions: 
+- Language / framework:
+- Architecture patterns:
+- Key conventions:
 
 ## Review Focus Areas
 
@@ -173,6 +233,10 @@ interface FileConfig {
   categories?: Category[];
   customInstructions?: string;
   maxFindings?: number;
+  maxToolCallsPerAgent?: number;
+  subagents?: boolean;
+  enabledSubagents?: string[];
+  parallelSubagents?: number;
 }
 
 async function loadYamlConfig(): Promise<FileConfig> {
@@ -200,6 +264,8 @@ async function loadYamlConfig(): Promise<FileConfig> {
     const rawMaxFilesPerChunk = parsed['max_files_per_chunk'];
     const rawContextLines = parsed['context_lines'];
     const rawMaxFindings = parsed['max_findings'];
+    const rawMaxToolCallsPerAgent = parsed['max_tool_calls_per_agent'];
+    const rawParallelSubagents = parsed['parallel_subagents'];
 
     if (rawSeverityThreshold !== undefined && !isValidSeverity(rawSeverityThreshold)) {
       vscode.window.showWarningMessage(
@@ -222,6 +288,16 @@ async function loadYamlConfig(): Promise<FileConfig> {
         : undefined,
       customInstructions: typeof parsed['custom_instructions'] === 'string' ? parsed['custom_instructions'] : undefined,
       maxFindings: Number.isFinite(rawMaxFindings) ? rawMaxFindings as number : undefined,
+      maxToolCallsPerAgent: Number.isFinite(rawMaxToolCallsPerAgent)
+        ? Math.max(1, Math.floor(rawMaxToolCallsPerAgent as number))
+        : undefined,
+      subagents: typeof parsed['subagents'] === 'boolean' ? parsed['subagents'] : undefined,
+      enabledSubagents: Array.isArray(parsed['enabled_subagents']) && parsed['enabled_subagents'].every(item => typeof item === 'string')
+        ? parsed['enabled_subagents']
+        : undefined,
+      parallelSubagents: Number.isFinite(rawParallelSubagents)
+        ? Math.max(1, Math.floor(rawParallelSubagents as number))
+        : undefined,
     };
   } catch (err) {
     vscode.window.showWarningMessage(`Copilot Review Agent: Failed to parse .copilot-review-agent.yml: ${err}`);

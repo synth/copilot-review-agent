@@ -249,13 +249,13 @@
         "copilotReviewAgent.severityThreshold": {
           "type": "string",
           "default": "low",
-            "enum": [
+          "enum": [
             "blocker",
             "high",
             "medium",
             "low",
             "nit"
-            ],
+          ],
           "description": "Minimum severity level to include in findings."
         },
         "copilotReviewAgent.excludePaths": {
@@ -299,7 +299,7 @@
     "watch": "tsc -watch -p ./",
     "package": "npm run compile && vsce package --no-dependencies",
     "lint": "tsc --noEmit",
-    "test": "TS_NODE_PROJECT=tsconfig.test.json mocha --require ts-node/register 'test/**/*.test.ts'"
+    "test": "tsx ./node_modules/mocha/bin/mocha.js \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -307,7 +307,7 @@
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.0.0",
     "mocha": "^11.7.5",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.0"
   }
 }

@@ -221,6 +221,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
       timestamp: s.timestamp,
       baseBranch: s.baseBranch,
       targetBranch: s.targetBranch,
+      modelId: s.modelId,
+      modelLabel: s.modelLabel,
       totalFindings: s.summary?.totalFindings ?? s.findings.length,
       openCount: s.summary?.openCount ?? s.findings.filter(f => f.status === 'open').length,
       fileCount: s.summary?.fileCount ?? new Set(s.findings.map(f => f.file)).size,
@@ -236,6 +238,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         timestamp: session.timestamp,
         baseBranch: session.baseBranch,
         targetBranch: session.targetBranch,
+        modelId: session.modelId,
+        modelLabel: session.modelLabel,
         agentSteps: session.agentSteps,
         summary: session.summary,
       },
@@ -367,4 +371,3 @@ function validateNonces(html: string): void {
     );
   }
 }
-

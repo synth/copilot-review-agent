@@ -35,6 +35,8 @@ export interface ReviewFinding {
   suggestedFix?: string;
   category: Category;
   status: 'open' | 'skipped' | 'fixed' | 'in-progress';
+  /** Which review tier produced this finding: 'tier1' or a subagent name */
+  source?: string;
 }
 
 /** A parsed diff hunk */
@@ -88,6 +90,14 @@ export interface CopilotReviewAgentConfig {
   categories: Category[];
   customInstructions: string;
   maxFindings: number;
+  /** Max tool-calling iterations per agent (default 10) */
+  maxToolCallsPerAgent: number;
+  /** Whether to run Tier 2 specialist subagents after the broad pass */
+  subagents: boolean;
+  /** Which subagent specialists to enable (empty = all) */
+  enabledSubagents: string[];
+  /** Max subagents to run in parallel */
+  parallelSubagents: number;
 }
 
 /** Maps severity to ThemeIcon */
@@ -130,6 +140,7 @@ export interface ReviewSession {
   baseBranch: string;
   targetBranch: string;
   modelId?: string;
+  modelLabel?: string;
   findings: ReviewFinding[];
   agentSteps: ReviewAgentStep[];
   summary?: ReviewSessionSummary;

@@ -1,13 +1,49 @@
 import * as vscode from 'vscode';
-import { DiffChunk, ReviewFinding, CopilotReviewAgentConfig, Severity, Category, nextFindingId, severityRank } from './types';
-import { buildChunkContext } from './chunker';
+import { DiffChunk, DiffFile, ReviewFinding, CopilotReviewAgentConfig, Severity, Category, nextFindingId, severityRank } from './types';
+import { buildChunkContext, chunkDiffFiles } from './chunker';
+import { REVIEW_TOOLS, executeTool, ToolCallInput } from './tools';
+import { SubagentDefinition, getActiveSubagents } from './subagents';
 
 /**
  * AI-powered code review engine using the VS Code Language Model API.
  */
+/** Callback for reporting tool calls during the agent loop */
+export interface ToolCallReporter {
+  (toolName: string, input: Record<string, unknown>): void;
+}
+
+export type ReviewProgressPhase =
+  | 'building-context'
+  | 'requesting-model'
+  | 'awaiting-first-token'
+  | 'streaming-response'
+  | 'executing-tools'
+  | 'parsing-response'
+  | 'complete';
+
+export interface ReviewProgressEvent {
+  phase: ReviewProgressPhase;
+  iteration?: number;
+  elapsedMs?: number;
+  toolCalls?: number;
+  detail?: string;
+}
+
+export interface ReviewCallbacks {
+  onToken?: (fragment: string) => void;
+  onToolCall?: ToolCallReporter;
+  onProgress?: (event: ReviewProgressEvent) => void;
+}
+
 export class ReviewEngine {
   private model: vscode.LanguageModelChat | undefined;
   private _selectedModelId: string | undefined;
+  private _workspacePath: string | undefined;
+
+  /** Set the workspace path so tools can execute git/fs operations */
+  setWorkspace(workspacePath: string): void {
+    this._workspacePath = workspacePath;
+  }
 
   /**
    * Set a specific model by ID (the `id` property of `vscode.LanguageModelChat`).
@@ -23,6 +59,17 @@ export class ReviewEngine {
   /** Return the currently selected model ID (family) or undefined for auto */
   get selectedModelId(): string | undefined {
     return this._selectedModelId;
+  }
+
+  /** Return the resolved model ID for the current review session. */
+  get activeModelId(): string | undefined {
+    return this.model?.id;
+  }
+
+  /** Return the resolved model label for the current review session. */
+  get activeModelLabel(): string | undefined {
+    if (!this.model) { return undefined; }
+    return this.model.name || this.model.family || this.model.id;
   }
 
   /**
@@ -106,11 +153,12 @@ export class ReviewEngine {
   }
 
   /**
-   * Build the system prompt for the review.
+   * Build the system prompt for Tier 1 broad pass reviews.
    */
-  private buildSystemPrompt(config: CopilotReviewAgentConfig): string {
+  buildSystemPrompt(config: CopilotReviewAgentConfig): string {
     const categories = config.categories.join(', ');
     const severity = config.severityThreshold;
+    const hasTools = !!this._workspacePath;
 
     let prompt = `You are a senior code reviewer performing a self-review of a branch diff. Your job is to find real, actionable issues — not nitpick style or formatting.
 
@@ -126,16 +174,40 @@ Review for these categories: ${categories}
 
 Only report findings at severity "${severity}" or above.
 
+## Review Approach
+1. Scan the diff for potential issues in the changed code.
+2. For anything that depends on code outside the diff — unused functions, broken callers, missing imports, cross-file impacts — use the available tools to investigate before reporting.
+3. Do NOT report an issue unless you have evidence. If unsure, use a tool to verify.
+
+## Checklist
+- Dead code: Are any new functions/methods/classes never called? Use check_symbol_usage to verify.
+- Security: SQL injection, XSS, command injection, hardcoded secrets, insecure auth.
+- Error handling: Are new async calls, API calls, or I/O operations properly error-handled?
+- Logic: Off-by-one errors, null/undefined checks, race conditions, wrong comparisons.
+- API contracts: If function signatures changed, are all callers updated?
+- Performance: N+1 queries, O(n²) in hot paths, unnecessary allocations in loops.
+
 ## Rules
-- Focus on the CHANGED lines (marked with +). Do not review unchanged context.
+- Focus primarily on the CHANGED lines (marked with +), but investigate cross-file impacts using tools.
 - Be specific: reference exact file paths and line numbers from the diff.
 - Each finding must have a concrete suggested fix.
 - Do NOT report: formatting issues, trailing whitespace, missing comments on obvious code.
 - Do NOT hallucinate line numbers. Only reference lines that appear in the diff context.
 - If the code looks correct and well-written, return an empty array.
-- Maximum ${config.maxFindings} findings total across all chunks.
+- Maximum ${config.maxFindings} findings total across all chunks.`;
 
-## Output Format
+    if (hasTools) {
+      prompt += `\n\n## Tools Available
+You have tools to investigate the codebase. Use them to verify findings before reporting:
+- search_codebase: Find references, callers, or patterns in the code.
+- read_file_section: Read specific lines of a file for more context.
+- check_symbol_usage: Count how many times a symbol is referenced.
+- get_file_outline: See the structure of a file (classes, functions, imports, exports).
+
+When you have finished investigating and are ready to report findings, respond with the JSON array.`;
+    }
+
+    prompt += `\n\n## Output Format
 Respond with ONLY a JSON array (no markdown fences, no explanation before/after). Each element:
 {
   "file": "path/to/file.rb",
@@ -158,44 +230,258 @@ If there are no findings, respond with: []`;
   }
 
   /**
+   * Rebuild the conversation for models that reject tool-enabled requests.
+   * Keep prior context, but add an explicit instruction that tools are unavailable.
+   */
+  private buildToolUnavailableFallbackMessages(
+    messages: vscode.LanguageModelChatMessage[]
+  ): vscode.LanguageModelChatMessage[] {
+    const fallbackInstruction = 'Tools are unavailable for this model. Do not emit tool calls or pseudo-tool syntax. Review using only the provided diff and prior context, and respond with ONLY the JSON array of findings.';
+
+    return [
+      ...messages.map(message => new vscode.LanguageModelChatMessage(message.role, [...message.content], message.name)),
+      vscode.LanguageModelChatMessage.User(fallbackInstruction),
+    ];
+  }
+
+  /**
+   * Run the agent loop: send messages with tool definitions to the LLM,
+   * handle tool call responses, execute tools, and re-send until the model
+   * responds with pure text (the findings JSON).
+   *
+   * @param messages The conversation messages
+   * @param token Cancellation token
+   * @param maxIterations Maximum tool-calling iterations (default 10)
+   * @param onToken Optional callback for streaming text tokens
+   * @param onToolCall Optional callback for reporting tool invocations
+   * @returns The final collected text response
+   */
+  async sendWithToolLoop(
+    messages: vscode.LanguageModelChatMessage[],
+    token: vscode.CancellationToken,
+    maxIterations: number = 10,
+    callbacks?: ReviewCallbacks
+  ): Promise<string> {
+    if (!this._workspacePath) {
+      // No workspace — fall back to a single call without tools
+      return this.sendSinglePass(messages, token, callbacks);
+    }
+
+    const tools = REVIEW_TOOLS;
+    let iteration = 0;
+
+    while (iteration < maxIterations) {
+      if (token.isCancellationRequested) { return ''; }
+
+      callbacks?.onProgress?.({
+        phase: 'requesting-model',
+        iteration: iteration + 1,
+        detail: `Analysis pass ${iteration + 1}`,
+      });
+
+      let response: vscode.LanguageModelChatResponse;
+      try {
+        response = await this.sendRequestWithRetry(messages, {
+          justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
+          tools,
+        }, token);
+      } catch (err: any) {
+        // If the model doesn't support tools, fall back to single pass
+        if (err?.message?.includes('tool') || err?.code === 'tool-not-supported') {
+          const fallbackMessages = this.buildToolUnavailableFallbackMessages(messages);
+          return this.sendSinglePass(fallbackMessages, token, callbacks);
+        }
+        throw err;
+      }
+
+      // Collect the response stream — may contain text and/or tool calls
+      let textContent = '';
+      const toolCalls: Array<{ callId: string; name: string; input: ToolCallInput }> = [];
+      const requestStartedAt = Date.now();
+      let firstTokenAt: number | undefined;
+
+      callbacks?.onProgress?.({
+        phase: 'awaiting-first-token',
+        iteration: iteration + 1,
+      });
+
+      try {
+        for await (const part of response.stream) {
+          if (token.isCancellationRequested) { return textContent; }
+
+          if (part instanceof vscode.LanguageModelTextPart) {
+            if (firstTokenAt === undefined) {
+              firstTokenAt = Date.now();
+              callbacks?.onProgress?.({
+                phase: 'streaming-response',
+                iteration: iteration + 1,
+                elapsedMs: firstTokenAt - requestStartedAt,
+              });
+            }
+            textContent += part.value;
+            if (callbacks?.onToken) { callbacks.onToken(part.value); }
+          } else if (part instanceof vscode.LanguageModelToolCallPart) {
+            toolCalls.push({
+              callId: part.callId,
+              name: part.name,
+              input: part.input as ToolCallInput,
+            });
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Stream error during tool loop iteration ${iteration}: ${msg}`);
+      }
+
+      // If no tool calls, the model is done — return the text
+      if (toolCalls.length === 0) {
+        callbacks?.onProgress?.({
+          phase: 'parsing-response',
+          iteration: iteration + 1,
+          elapsedMs: Date.now() - requestStartedAt,
+          detail: firstTokenAt === undefined ? 'Response completed without streamed text.' : undefined,
+        });
+        return textContent;
+      }
+
+      // The model made tool calls — execute them and continue the loop
+      // First, add the assistant's response (text + tool calls) to messages
+      const assistantParts: Array<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart> = [];
+      if (textContent) {
+        assistantParts.push(new vscode.LanguageModelTextPart(textContent));
+      }
+      for (const tc of toolCalls) {
+        assistantParts.push(new vscode.LanguageModelToolCallPart(tc.callId, tc.name, tc.input));
+      }
+      messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
+
+      // Execute all tool calls in parallel to avoid blocking the extension host
+      for (const tc of toolCalls) {
+        if (callbacks?.onToolCall) { callbacks.onToolCall(tc.name, tc.input); }
+      }
+
+      callbacks?.onProgress?.({
+        phase: 'executing-tools',
+        iteration: iteration + 1,
+        toolCalls: toolCalls.length,
+        elapsedMs: Date.now() - requestStartedAt,
+      });
+
+      const toolExecutionStartedAt = Date.now();
+      const toolResults = await Promise.all(
+        toolCalls.map(async (tc) => {
+          let result: string;
+          try {
+            result = await executeTool(tc.name, tc.input, this._workspacePath!);
+          } catch (err: any) {
+            result = `Tool error: ${err.message}`;
+          }
+          return new vscode.LanguageModelToolResultPart(tc.callId, [new vscode.LanguageModelTextPart(result)]);
+        })
+      );
+      const toolResultParts: vscode.LanguageModelToolResultPart[] = toolResults;
+
+      callbacks?.onProgress?.({
+        phase: 'awaiting-first-token',
+        iteration: iteration + 2,
+        elapsedMs: Date.now() - toolExecutionStartedAt,
+        detail: `Executed ${toolCalls.length} tool call${toolCalls.length !== 1 ? 's' : ''}`,
+      });
+
+      // Add tool results as a User message
+      messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
+
+      iteration++;
+    }
+
+    // Max iterations reached — do one final call without tools to force a text response
+    return this.sendSinglePass(messages, token, callbacks);
+  }
+
+  /**
+   * Single-pass LLM call without tools. Used as fallback and for final iteration.
+   */
+  private async sendSinglePass(
+    messages: vscode.LanguageModelChatMessage[],
+    token: vscode.CancellationToken,
+    callbacks?: ReviewCallbacks
+  ): Promise<string> {
+    let fullText = '';
+    const requestStartedAt = Date.now();
+
+    callbacks?.onProgress?.({ phase: 'requesting-model', iteration: 1 });
+    try {
+      const response = await this.sendRequestWithRetry(messages, {
+        justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
+      }, token);
+
+      callbacks?.onProgress?.({ phase: 'awaiting-first-token', iteration: 1 });
+
+      let firstTokenAt: number | undefined;
+      for await (const fragment of response.text) {
+        if (token.isCancellationRequested) { break; }
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          callbacks?.onProgress?.({
+            phase: 'streaming-response',
+            iteration: 1,
+            elapsedMs: firstTokenAt - requestStartedAt,
+          });
+        }
+        fullText += fragment;
+        if (callbacks?.onToken) { callbacks.onToken(fragment); }
+      }
+
+      callbacks?.onProgress?.({
+        phase: 'parsing-response',
+        iteration: 1,
+        elapsedMs: Date.now() - requestStartedAt,
+        detail: firstTokenAt === undefined ? 'Response completed without streamed text.' : undefined,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Single-pass LLM call failed (fallback/final pass): ${msg}`);
+    }
+    return fullText;
+  }
+
+  /**
    * Review a single chunk of diff files.
    * @param onToken Optional callback invoked with each streamed token fragment
+   * @param onToolCall Optional callback for reporting tool invocations
    */
   async reviewChunk(
     chunk: DiffChunk,
     config: CopilotReviewAgentConfig,
     token: vscode.CancellationToken,
-    onToken?: (fragment: string) => void
+    callbacks?: ReviewCallbacks
   ): Promise<ReviewFinding[]> {
+    callbacks?.onProgress?.({
+      phase: 'building-context',
+      detail: `${chunk.files.length} file${chunk.files.length !== 1 ? 's' : ''}`,
+    });
+
     const systemPrompt = this.buildSystemPrompt(config);
     const chunkContext = buildChunkContext(chunk, config);
 
-    // Note: The VS Code Language Model Chat API does not currently expose a
-    // dedicated System message role for most models. As a workaround, we send
-    // the system instructions as a User message, followed by an Assistant
-    // acknowledgment and the actual review request. This pattern ensures the
-    // model understands the instructions while maintaining compatibility.
     const messages = [
       vscode.LanguageModelChatMessage.User(systemPrompt),
       vscode.LanguageModelChatMessage.Assistant('Understood. I will review the code changes following these instructions and respond with only a JSON array of findings.'),
       vscode.LanguageModelChatMessage.User(`Review the following code changes:\n\n${chunkContext}`),
     ];
 
-    const response = await this.sendRequestWithRetry(messages, {
-      justification: 'Copilot Review Agent: Analyzing branch diff for code issues',
-    }, token);
-
-    // Collect the full streamed response, forwarding tokens to caller
-    let fullText = '';
-    for await (const fragment of response.text) {
-      if (token.isCancellationRequested) { break; }
-      fullText += fragment;
-      if (onToken) { onToken(fragment); }
-    }
+    const fullText = await this.sendWithToolLoop(messages, token, config.maxToolCallsPerAgent ?? 10, callbacks);
 
     if (token.isCancellationRequested) { return []; }
 
-    return this.parseFindings(fullText, config);
+    callbacks?.onProgress?.({ phase: 'parsing-response' });
+
+    const findings = this.parseFindings(fullText, config);
+    callbacks?.onProgress?.({
+      phase: 'complete',
+      detail: `${findings.length} finding${findings.length !== 1 ? 's' : ''}`,
+    });
+    return findings;
   }
 
   /**
@@ -348,5 +634,103 @@ ${truncatedContent}
     }
 
     return fixText;
+  }
+
+  /**
+   * Run Tier 2 specialist subagents in parallel against the full set of diff files.
+   * Each subagent runs its own tool loop and produces findings tagged with its source.
+   *
+   * @param files All diff files from the review
+   * @param config Review configuration
+   * @param token Cancellation token
+   * @param onSubagentStart Called when a subagent begins (for progress display)
+   * @param onSubagentDone Called when a subagent finishes (for progress display)
+   * @param onToolCall Called when a subagent invokes a tool
+   */
+  async runSubagents(
+    files: DiffFile[],
+    config: CopilotReviewAgentConfig,
+    token: vscode.CancellationToken,
+    onSubagentStart?: (agent: SubagentDefinition) => void,
+    onSubagentDone?: (agent: SubagentDefinition, findings: ReviewFinding[]) => void,
+    onToolCall?: ToolCallReporter
+  ): Promise<ReviewFinding[]> {
+    const activeSubagents = getActiveSubagents(config, files);
+    if (activeSubagents.length === 0) { return []; }
+
+    const parallelLimit = Math.max(1, config.parallelSubagents ?? 1);
+    const allFindings: ReviewFinding[] = [];
+
+    // Run subagents in batches of parallelLimit
+    for (let i = 0; i < activeSubagents.length; i += parallelLimit) {
+      if (token.isCancellationRequested) { break; }
+
+      const batch = activeSubagents.slice(i, i + parallelLimit);
+      const batchResults = await Promise.all(
+        batch.map(({ agent, relevantFiles }) => this.runSingleSubagent(agent, relevantFiles, config, token, onSubagentStart, onToolCall))
+      );
+
+      for (let j = 0; j < batch.length; j++) {
+        const findings = batchResults[j];
+        if (onSubagentDone) { onSubagentDone(batch[j].agent, findings); }
+        allFindings.push(...findings);
+      }
+    }
+
+    return allFindings;
+  }
+
+  /**
+   * Execute a single specialist subagent.
+   */
+  private async runSingleSubagent(
+    agent: SubagentDefinition,
+    relevantFiles: DiffFile[],
+    config: CopilotReviewAgentConfig,
+    token: vscode.CancellationToken,
+    onSubagentStart?: (agent: SubagentDefinition) => void,
+    onToolCall?: ToolCallReporter
+  ): Promise<ReviewFinding[]> {
+    if (onSubagentStart) { onSubagentStart(agent); }
+
+    const systemPrompt = agent.buildPrompt(config);
+
+    // Chunk the relevant files using the same token budget as Tier 1 reviews
+    // to avoid unbounded prompt sizes on large diffs.
+    const chunks = chunkDiffFiles(relevantFiles, config);
+    const allFindings: ReviewFinding[] = [];
+
+    for (const chunk of chunks) {
+      if (token.isCancellationRequested) { break; }
+
+      const context = buildChunkContext(chunk, config);
+      const messages = [
+        vscode.LanguageModelChatMessage.User(systemPrompt),
+        vscode.LanguageModelChatMessage.Assistant('Understood. I will focus exclusively on my specialty area and use tools to verify findings before reporting.'),
+        vscode.LanguageModelChatMessage.User(`Analyze the following code changes:\n\n${context}`),
+      ];
+
+      try {
+        const fullText = await this.sendWithToolLoop(
+          messages,
+          token,
+          config.maxToolCallsPerAgent ?? 10,
+          { onToolCall }
+        );
+
+        if (token.isCancellationRequested) { break; }
+
+        const findings = this.parseFindings(fullText, config);
+        for (const f of findings) {
+          f.source = agent.id;
+        }
+        allFindings.push(...findings);
+      } catch (err: any) {
+        // Don't let one chunk failure kill the entire subagent
+        vscode.window.showWarningMessage(`Copilot Review Agent: ${agent.label} failed on chunk: ${err.message}`);
+      }
+    }
+
+    return allFindings;
   }
 }
